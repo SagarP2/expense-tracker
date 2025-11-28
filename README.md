@@ -70,5 +70,4 @@ npm start
 - Export data (CSV)
 - Dark/Light mode
 
-## ⭐ Support
-If you like this project, please star the repo!
+
