@@ -1,19 +1,19 @@
 import { NavLink } from 'react-router-dom';
-import { LayoutDashboard, Receipt, ChevronRight, Wallet, Users } from 'lucide-react';
+import { LayoutDashboard,Receipt,ChevronRight,Wallet,Users } from 'lucide-react';
 import { clsx } from 'clsx';
 
-export function Sidebar({ isOpen, setIsOpen }) {
+export function Sidebar({ isOpen,setIsOpen }) {
   const navItems = [
-    { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
-    { icon: Receipt, label: 'Transactions', path: '/transactions' },
-    { icon: Users, label: 'Collaborations', path: '/collaborations' },
+    { icon: LayoutDashboard,label: 'Dashboard',path: '/' },
+    { icon: Receipt,label: 'Transactions',path: '/transactions' },
+    { icon: Users,label: 'Collaborations',path: '/collaborations' },
   ];
 
   return (
     <>
       {/* Mobile Overlay */}
       {isOpen && (
-        <div 
+        <div
           className="fixed inset-0 bg-black/20 backdrop-blur-sm z-40 lg:hidden animate-fade-in"
           onClick={() => setIsOpen(false)}
         />
@@ -41,27 +41,19 @@ export function Sidebar({ isOpen, setIsOpen }) {
               onClick={() => setIsOpen(false)}
               className={({ isActive }) => clsx(
                 "group flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200",
-                isActive 
-                  ? "bg-primary text-white shadow-glow" 
+                isActive
+                  ? "bg-primary text-white shadow-glow"
                   : "text-text-muted hover:bg-white/50 hover:text-primary"
               )}
             >
               <item.icon size={20} className={clsx("transition-transform group-hover:scale-110")} />
               <span className="flex-1">{item.label}</span>
-              <ChevronRight size={16} className={clsx("opacity-0 -translate-x-2 transition-all", ({isActive}) => isActive ? "opacity-100 translate-x-0" : "group-hover:opacity-50 group-hover:translate-x-0")} />
+              <ChevronRight size={16} className={clsx("opacity-0 -translate-x-2 transition-all",({ isActive }) => isActive ? "opacity-100 translate-x-0" : "group-hover:opacity-50 group-hover:translate-x-0")} />
             </NavLink>
           ))}
         </nav>
 
-        <div className="p-6">
-          <div className="bg-gradient-to-br from-gray-900 to-gray-800 rounded-2xl p-4 text-white shadow-lg relative overflow-hidden group">
-            <div className="absolute top-0 right-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
-              <Wallet size={60} />
-            </div>
-            <p className="text-xs text-gray-400 font-medium mb-1">Pro Tip</p>
-            <p className="text-sm font-medium leading-relaxed">Track your expenses daily to save more!</p>
-          </div>
-        </div>
+
       </aside>
     </>
   );

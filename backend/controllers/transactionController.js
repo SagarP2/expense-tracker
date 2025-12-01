@@ -12,7 +12,7 @@ const getTransactions = async (req,res) => {
         if (endDate) query.date.$lte = new Date(endDate);
     }
 
-    const transactions = await Transaction.find(query).sort({ date: -1 });
+    const transactions = await Transaction.find(query).sort({ date: -1,createdAt: -1 });
     res.json(transactions);
 };
 

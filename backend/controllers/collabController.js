@@ -1,6 +1,7 @@
 const Collaboration = require('../models/Collaboration');
 const CollabTransaction = require('../models/CollabTransaction');
 const User = require('../models/User');
+const mongoose = require('mongoose');
 
 // Send collaboration invite
 exports.sendInvite = async (req,res) => {
@@ -213,7 +214,7 @@ exports.getTransactions = async (req,res) => {
 
         const transactions = await CollabTransaction.find({ collaborationId: id })
             .populate('userId','name email')
-            .sort({ date: -1 });
+            .sort({ date: -1,createdAt: -1 });
 
         res.json(transactions);
     } catch (error) {
@@ -304,23 +305,54 @@ exports.getBalanceSummary = async (req,res) => {
         let userB_total_expense = 0;
         let userA_total_income = 0;
         let userB_total_income = 0;
+        
+        // Track settlement amounts separately
+        let userA_settled_paid = 0;
+        let userB_settled_paid = 0;
+        let userA_settled_received = 0;
+        let userB_settled_received = 0;
 
         transactions.forEach(t => {
+            const isSettlement = t.category === 'Settlement' || t.category === 'Settlement Received';
+            
             if (t.userId.toString() === userA._id.toString()) {
-                if (t.type === 'expense') userA_total_expense += t.amount;
-                else userA_total_income += t.amount;
+                if (t.type === 'expense') {
+                    if (isSettlement) userA_settled_paid += t.amount;
+                    else userA_total_expense += t.amount;
+                } else {
+                    if (isSettlement) userA_settled_received += t.amount;
+                    else userA_total_income += t.amount;
+                }
             } else {
-                if (t.type === 'expense') userB_total_expense += t.amount;
-                else userB_total_income += t.amount;
+                if (t.type === 'expense') {
+                    if (isSettlement) userB_settled_paid += t.amount;
+                    else userB_total_expense += t.amount;
+                } else {
+                    if (isSettlement) userB_settled_received += t.amount;
+                    else userB_total_income += t.amount;
+                }
             }
         });
 
         const total_expense = userA_total_expense + userB_total_expense;
         const total_income = userA_total_income + userB_total_income;
-        const amount_each_should_pay = total_expense / 2;
 
-        const userA_balance = userA_total_expense - amount_each_should_pay;
-        const userB_balance = userB_total_expense - amount_each_should_pay;
+        // Net contribution (excluding settlements) = Expense Paid - Income Received
+        const userA_net = userA_total_expense - userA_total_income;
+        const userB_net = userB_total_expense - userB_total_income;
+
+        const total_net_spend = userA_net + userB_net;
+        const amount_each_should_pay = total_net_spend / 2;
+
+        // Base Balance = Net Contribution - Target Share
+        let userA_balance = userA_net - amount_each_should_pay;
+        let userB_balance = userB_net - amount_each_should_pay;
+
+        // Apply settlements to balance
+        // If I paid settlement (Expense), I reduced my debt (or increased my credit), so ADD to balance
+        // If I received settlement (Income), I was paid back, so SUBTRACT from balance
+        userA_balance = userA_balance + userA_settled_paid - userA_settled_received;
+        userB_balance = userB_balance + userB_settled_paid - userB_settled_received;
 
         let final_statement = '';
         let owedAmount = 0;
@@ -331,17 +363,225 @@ exports.getBalanceSummary = async (req,res) => {
             final_statement = 'Both are settled';
         } else if (userA_balance > 0) {
             owedAmount = Math.abs(userA_balance);
-            owedBy = userB;
-            owedTo = userA;
-            final_statement = `${userB.name} owes ${userA.name} ₹${owedAmount.toFixed(2)}`;
-        } else {
-            owedAmount = Math.abs(userA_balance);
             owedBy = userA;
             owedTo = userB;
-            final_statement = `${userA.name} owes ${userB.name} ₹${owedAmount.toFixed(2)}`;
+            final_statement = `${userB.name} Paids To ${userA.name} is ₹${owedAmount.toFixed(2)}`;
+        } else {
+            owedAmount = Math.abs(userA_balance);
+            owedBy = userB;
+            owedTo = userA;
+            final_statement = `${userA.name} Paids To ${userB.name} is ₹${owedAmount.toFixed(2)}`;
         }
 
         res.json({
+            userA: {
+                id: userA._id,
+                name: userA.name,
+                email: userA.email,
+                total_expense: userA_total_expense, // Only shared expenses
+                total_income: userA_total_income,
+                balance: userA_balance
+            },
+            userB: {
+                id: userB._id,
+                name: userB.name,
+                email: userB.email,
+                total_expense: userB_total_expense, // Only shared expenses
+                total_income: userB_total_income,
+                balance: userB_balance
+            },
+            total_expense,
+            total_income,
+            amount_each_should_pay,
+            final_statement,
+            owedAmount,
+            owedBy,
+            owedTo
+        });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+};
+
+// Settle payment - creates settlement transactions
+exports.settlePayment = async (req, res) => {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+        const { id } = req.params;
+        const userId = req.user.id;
+        const { payerId, receiverId, amount, method } = req.body;
+
+        // Validate input
+        if (!payerId || !receiverId || !amount || !method) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({ message: 'Missing required fields' });
+        }
+
+        if (!['UPI', 'Cash'].includes(method)) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({ message: 'Invalid payment method' });
+        }
+
+        // Get collaboration
+        const collaboration = await Collaboration.findById(id).populate('users', 'name email').session(session);
+        if (!collaboration) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(404).json({ message: 'Collaboration not found' });
+        }
+
+        if (collaboration.status !== 'active') {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({ message: 'Collaboration is not active' });
+        }
+
+        // Verify requester is the payer
+        if (payerId !== userId) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(403).json({ message: 'You can only make payments on your own behalf' });
+        }
+
+        // Verify both users are part of the collaboration
+        const isPayerParticipant = collaboration.users.some(user => user._id.toString() === payerId);
+        const isReceiverParticipant = collaboration.users.some(user => user._id.toString() === receiverId);
+        
+        if (!isPayerParticipant || !isReceiverParticipant) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(403).json({ message: 'Invalid payer or receiver' });
+        }
+
+        // Check for duplicate settlement (idempotency)
+        const existingSettlement = await CollabTransaction.findOne({
+            collaborationId: id,
+            userId: payerId,
+            category: 'Settlement',
+            amount: amount,
+            createdAt: { $gte: new Date(Date.now() - 60000) } // Within last minute
+        }).session(session);
+
+        if (existingSettlement) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(400).json({ message: 'Duplicate payment detected. Please wait before trying again.' });
+        }
+
+        // Create two transactions
+        const currentDate = new Date();
+
+        // 1. Expense transaction for payer
+        const [payerTransaction] = await CollabTransaction.create([{
+            collaborationId: id,
+            userId: payerId,
+            amount: amount,
+            type: 'expense',
+            category: 'Settlement',
+            description: `Settlement payment via ${method}`,
+            date: currentDate
+        }], { session });
+
+        // 2. Income transaction for receiver
+        const [receiverTransaction] = await CollabTransaction.create([{
+            collaborationId: id,
+            userId: receiverId,
+            amount: amount,
+            type: 'income',
+            category: 'Settlement Received',
+            description: `Settlement received via ${method}`,
+            date: currentDate
+        }], { session });
+
+        // Populate user details - need to do this after creation since create returns array with session
+        // We can just populate the instances we have, but for consistency with response, let's rely on what we send back
+        // Mongoose create with session returns an array, so we destructured above.
+        
+        // We need to manually populate or fetch again if we want populated fields in response immediately, 
+        // but for balance calculation we just need the data in DB.
+        
+        // Get updated balance summary (Reuse logic from getBalanceSummary)
+        // IMPORTANT: Must use the same session to see the new transactions!
+        const transactions = await CollabTransaction.find({ collaborationId: id }).session(session);
+
+        const userA = collaboration.users[0];
+        const userB = collaboration.users[1];
+
+        let userA_total_expense = 0;
+        let userB_total_expense = 0;
+        let userA_total_income = 0;
+        let userB_total_income = 0;
+        
+        // Track settlement amounts separately
+        let userA_settled_paid = 0;
+        let userB_settled_paid = 0;
+        let userA_settled_received = 0;
+        let userB_settled_received = 0;
+
+        transactions.forEach(t => {
+            const isSettlement = t.category === 'Settlement' || t.category === 'Settlement Received';
+            
+            if (t.userId.toString() === userA._id.toString()) {
+                if (t.type === 'expense') {
+                    if (isSettlement) userA_settled_paid += t.amount;
+                    else userA_total_expense += t.amount;
+                } else {
+                    if (isSettlement) userA_settled_received += t.amount;
+                    else userA_total_income += t.amount;
+                }
+            } else {
+                if (t.type === 'expense') {
+                    if (isSettlement) userB_settled_paid += t.amount;
+                    else userB_total_expense += t.amount;
+                } else {
+                    if (isSettlement) userB_settled_received += t.amount;
+                    else userB_total_income += t.amount;
+                }
+            }
+        });
+
+        const total_expense = userA_total_expense + userB_total_expense;
+        const total_income = userA_total_income + userB_total_income;
+
+        // Net contribution (excluding settlements) = Expense Paid - Income Received
+        const userA_net = userA_total_expense - userA_total_income;
+        const userB_net = userB_total_expense - userB_total_income;
+
+        const total_net_spend = userA_net + userB_net;
+        const amount_each_should_pay = total_net_spend / 2;
+
+        // Base Balance = Net Contribution - Target Share
+        let userA_balance = userA_net - amount_each_should_pay;
+        let userB_balance = userB_net - amount_each_should_pay;
+
+        // Apply settlements to balance
+        userA_balance = userA_balance + userA_settled_paid - userA_settled_received;
+        userB_balance = userB_balance + userB_settled_paid - userB_settled_received;
+
+        let final_statement = '';
+        let owedAmount = 0;
+        let owedBy = null;
+        let owedTo = null;
+
+        if (Math.abs(userA_balance) < 0.01) {
+            final_statement = 'Both are settled';
+        } else if (userA_balance > 0) {
+            owedAmount = Math.abs(userA_balance);
+            owedBy = userA;
+            owedTo = userB;
+            final_statement = `${userB.name} Paids To ${userA.name} is ₹${owedAmount.toFixed(2)}`;
+        } else {
+            owedAmount = Math.abs(userA_balance);
+            owedBy = userB;
+            owedTo = userA;
+            final_statement = `${userA.name} Paids To ${userB.name} is ₹${owedAmount.toFixed(2)}`;
+        }
+
+        const balance = {
             userA: {
                 id: userA._id,
                 name: userA.name,
@@ -365,8 +605,25 @@ exports.getBalanceSummary = async (req,res) => {
             owedAmount,
             owedBy,
             owedTo
+        };
+
+        await session.commitTransaction();
+        session.endSession();
+
+        // Populate transactions for response (outside transaction is fine)
+        await payerTransaction.populate('userId', 'name email');
+        await receiverTransaction.populate('userId', 'name email');
+
+        res.json({
+            success: true,
+            message: 'Payment settled successfully',
+            balance,
+            transactions: [payerTransaction, receiverTransaction]
         });
     } catch (error) {
+        await session.abortTransaction();
+        session.endSession();
+        console.error('Settlement payment error:', error);
         res.status(500).json({ message: error.message });
     }
 };

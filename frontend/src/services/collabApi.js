@@ -59,3 +59,9 @@ export const getBalanceSummary = async (id) => {
     const { data } = await api.get(`/collab/${id}/balance-summary`);
     return data;
 };
+
+// Settle payment
+export const settlePayment = async (id, paymentData) => {
+    const { data } = await api.post(`/collab/${id}/settlement/pay`, paymentData);
+    return data;
+};

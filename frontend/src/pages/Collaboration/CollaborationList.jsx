@@ -173,7 +173,7 @@ export default function CollaborationList() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {activeCollabs.map((collab) => {
-              const otherUser = collab.users.find(u => u._id !== collab.createdBy._id);
+              const otherUser = collab.users.find(u => u._id !== user._id);
               
               return (
                 <Card 

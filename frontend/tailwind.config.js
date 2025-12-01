@@ -22,7 +22,7 @@ export default {
                     950: "#172554",
                 },
                 secondary: "#64748b",
-                background: "#f8fafc",
+                background: "#f1f8ffff",
                 surface: "#ffffff",
                 text: "#0f172a",
                 "text-muted": "#64748b",

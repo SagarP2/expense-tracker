@@ -1,0 +1,153 @@
+import { useState } from 'react';
+import { X, CreditCard, Wallet } from 'lucide-react';
+import { Button } from './ui/Button';
+import { formatCurrency } from '../utils/format';
+
+export const PaymentModal = ({
+    isOpen,
+    onClose,
+    payer,
+    receiver,
+    amount,
+    onConfirm
+}) => {
+    const [paymentMethod, setPaymentMethod] = useState('UPI');
+    const [isLoading, setIsLoading] = useState(false);
+
+    if (!isOpen) return null;
+
+    const handleConfirm = async () => {
+        setIsLoading(true);
+        try {
+            await onConfirm(paymentMethod);
+            onClose();
+        } catch (error) {
+            // Error handling is done in parent component
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    return (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 relative animate-fadeIn">
+                {/* Close Button */}
+                <button
+                    onClick={onClose}
+                    disabled={isLoading}
+                    className="absolute top-4 right-4 p-2 hover:bg-gray-100 rounded-lg transition-colors disabled:opacity-50"
+                >
+                    <X size={20} />
+                </button>
+
+                {/* Header */}
+                <div className="mb-6">
+                    <h3 className="text-2xl font-bold text-text mb-2">Settle Payment</h3>
+                    <p className="text-text-muted text-sm">Choose your payment method to complete the settlement</p>
+                </div>
+
+                {/* Payment Details */}
+                <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-4 mb-6 border border-blue-100">
+                    <div className="space-y-2">
+                        <div className="flex justify-between items-center">
+                            <span className="text-text-muted text-sm">From</span>
+                            <span className="font-semibold text-text">{payer}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                            <span className="text-text-muted text-sm">To</span>
+                            <span className="font-semibold text-text">{receiver}</span>
+                        </div>
+                        <div className="h-px bg-blue-200 my-2"></div>
+                        <div className="flex justify-between items-center">
+                            <span className="text-text-muted text-sm">Amount</span>
+                            <span className="text-2xl font-bold text-primary">{formatCurrency(amount)}</span>
+                        </div>
+                    </div>
+                </div>
+
+                {/* Payment Method Selection */}
+                <div className="mb-6">
+                    <label className="block text-sm font-semibold text-text mb-3">Payment Method</label>
+                    <div className="space-y-3">
+                        {/* UPI Option */}
+                        <label className={`flex items-center p-4 rounded-xl border-2 cursor-pointer transition-all ${paymentMethod === 'UPI'
+                                ? 'border-primary bg-primary/5'
+                                : 'border-gray-200 hover:border-gray-300'
+                            }`}>
+                            <input
+                                type="radio"
+                                name="paymentMethod"
+                                value="UPI"
+                                checked={paymentMethod === 'UPI'}
+                                onChange={(e) => setPaymentMethod(e.target.value)}
+                                disabled={isLoading}
+                                className="w-4 h-4 text-primary focus:ring-primary"
+                            />
+                            <div className="ml-3 flex items-center gap-3 flex-1">
+                                <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${paymentMethod === 'UPI' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600'
+                                    }`}>
+                                    <CreditCard size={20} />
+                                </div>
+                                <div>
+                                    <div className="font-semibold text-text">UPI</div>
+                                    <div className="text-xs text-text-muted">Google Pay, PhonePe, Paytm</div>
+                                </div>
+                            </div>
+                        </label>
+
+                        {/* Cash Option */}
+                        <label className={`flex items-center p-4 rounded-xl border-2 cursor-pointer transition-all ${paymentMethod === 'Cash'
+                                ? 'border-primary bg-primary/5'
+                                : 'border-gray-200 hover:border-gray-300'
+                            }`}>
+                            <input
+                                type="radio"
+                                name="paymentMethod"
+                                value="Cash"
+                                checked={paymentMethod === 'Cash'}
+                                onChange={(e) => setPaymentMethod(e.target.value)}
+                                disabled={isLoading}
+                                className="w-4 h-4 text-primary focus:ring-primary"
+                            />
+                            <div className="ml-3 flex items-center gap-3 flex-1">
+                                <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${paymentMethod === 'Cash' ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600'
+                                    }`}>
+                                    <Wallet size={20} />
+                                </div>
+                                <div>
+                                    <div className="font-semibold text-text">Cash</div>
+                                    <div className="text-xs text-text-muted">Physical currency</div>
+                                </div>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex gap-3">
+                    <Button
+                        onClick={onClose}
+                        disabled={isLoading}
+                        className="flex-1 bg-gray-100 hover:bg-gray-200 text-text"
+                    >
+                        Cancel
+                    </Button>
+                    <Button
+                        onClick={handleConfirm}
+                        disabled={isLoading}
+                        className="flex-1 bg-primary hover:bg-primary/90 text-white shadow-glow"
+                    >
+                        {isLoading ? (
+                            <div className="flex items-center gap-2">
+                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                                Processing...
+                            </div>
+                        ) : (
+                            `Confirm Payment`
+                        )}
+                    </Button>
+                </div>
+            </div>
+        </div>
+    );
+};

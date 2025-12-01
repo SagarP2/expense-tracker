@@ -11,7 +11,8 @@ const {
     getTransactions,
     updateTransaction,
     deleteTransaction,
-    getBalanceSummary
+    getBalanceSummary,
+    settlePayment
 } = require('../controllers/collabController');
 
 // Collaboration routes
@@ -29,5 +30,8 @@ router.delete('/:id/transactions/:transactionId',protect,deleteTransaction);
 
 // Balance summary
 router.get('/:id/balance-summary',protect,getBalanceSummary);
+
+// Settlement payment
+router.post('/:id/settlement/pay',protect,settlePayment);
 
 module.exports = router;

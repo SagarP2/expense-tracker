@@ -1,13 +1,60 @@
-import { useEffect, useState } from 'react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
+import { useEffect, useState, useMemo } from 'react';
+import { Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { Card } from '../components/ui/Card';
 import api from '../utils/axiosInstance';
 import { formatCurrency } from '../utils/format';
-import { TrendingUp, TrendingDown, Wallet, ArrowUpRight, ArrowDownRight, Activity } from 'lucide-react';
+import { TrendingUp, TrendingDown, Wallet, ArrowUpRight, ArrowDownRight, Activity, Eye, EyeOff } from 'lucide-react';
+import {
+  calculateHealthScore, getSmartInsights, getWeeklyActivity,
+  getCategoryHighlight, getMiniStats
+} from '../utils/dashboardUtils';
+import {
+  MiniStatsStrip, HealthScoreWidget, SmartInsightsWidget,
+  GoalTrackerWidget, WeeklyActivityWidget, CategoryHighlightWidget,
+  HealthBarWidget
+} from '../components/DashboardWidgets';
+
+const CustomXAxisTick = ({ x, y, payload }) => {
+  const MAX_LENGTH = 10;
+  let text = payload.value;
+  let lines = [];
+
+  if (text.length > MAX_LENGTH && text.includes(' ')) {
+    const words = text.split(' ');
+    let currentLine = words[0];
+    for (let i = 1; i < words.length; i++) {
+      if ((currentLine + ' ' + words[i]).length <= MAX_LENGTH) {
+        currentLine += ' ' + words[i];
+      } else {
+        lines.push(currentLine);
+        currentLine = words[i];
+      }
+    }
+    lines.push(currentLine);
+  } else {
+    lines = [text];
+  }
+
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <text x={0} y={10} dy={10} textAnchor="middle" fill="#64748b" fontSize={11} fontWeight={500}>
+        {lines.map((line, index) => (
+          <tspan x={0} dy={index === 0 ? 0 : 14} key={index}>
+            {line}
+          </tspan>
+        ))}
+      </text>
+    </g>
+  );
+};
+
 
 export default function Dashboard() {
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [savingsGoal, setSavingsGoal] = useState(0);
+  const [hideBalance, setHideBalance] = useState(true);
+  const [hideIncome, setHideIncome] = useState(true);
 
   useEffect(() => {
     const fetchTransactions = async () => {
@@ -23,18 +70,154 @@ export default function Dashboard() {
     fetchTransactions();
   }, []);
 
-  const totalIncome = transactions
+  useEffect(() => {
+    const fetchSavingsGoal = async () => {
+      try {
+        console.log('Fetching savings goal...');
+        const { data } = await api.get('/users/savings-goal');
+        console.log('Fetched savings goal:', data);
+        setSavingsGoal(data.savingsGoal || 0);
+      } catch (error) {
+        console.error('Failed to fetch savings goal', error);
+      }
+    };
+    fetchSavingsGoal();
+  }, []);
+
+  const handleUpdateSavingsGoal = async (newGoal) => {
+    try {
+      console.log('Updating savings goal to:', newGoal);
+      const { data } = await api.put('/users/savings-goal', { savingsGoal: newGoal });
+      console.log('Received response:', data);
+      setSavingsGoal(data.savingsGoal);
+    } catch (error) {
+      console.error('Failed to update savings goal', error);
+      alert('Failed to update savings goal. Please try again.');
+    }
+  };
+
+  // include month filter (default to current month)
+  const [filter, setFilter] = useState({
+    type: '',
+    search: '',
+    month: new Date().toISOString().slice(0, 7), // YYYY-MM
+    year: new Date().getFullYear().toString(),
+    viewMode: 'month' // 'month' or 'year'
+  });
+
+  // Calculate All-Time Balance (for Month View)
+  const allTimeIncome = transactions
     .filter(t => t.type === 'income')
     .reduce((acc, curr) => acc + curr.amount, 0);
 
-  const totalExpense = transactions
+  const allTimeExpense = transactions
     .filter(t => t.type === 'expense')
     .reduce((acc, curr) => acc + curr.amount, 0);
 
-  const balance = totalIncome - totalExpense;
+  const allTimeBalance = allTimeIncome - allTimeExpense;
+
+  // Filter transactions based on View Mode
+  const filteredTransactions = transactions.filter(t => {
+    const tDate = new Date(t.date);
+
+    if (filter.viewMode === 'month') {
+      if (!filter.month) return true;
+      const tMonth = tDate.toISOString().slice(0, 7); // YYYY-MM
+      return tMonth === filter.month;
+    } else {
+      // Year View
+      if (!filter.year) return true;
+      const tYear = tDate.getFullYear().toString();
+      return tYear === filter.year;
+    }
+  });
+
+  const totalIncome = filteredTransactions
+    .filter(t => t.type === 'income')
+    .reduce((acc, curr) => acc + curr.amount, 0);
+
+  const totalExpense = filteredTransactions
+    .filter(t => t.type === 'expense')
+    .reduce((acc, curr) => acc + curr.amount, 0);
+
+  const balance = filter.viewMode === 'year'
+    ? totalIncome - totalExpense // Year Balance
+    : allTimeBalance; // All-Time Balance (for Month View)
+
+  // Calculate Percentage Change dynamically
+  const percentageChange = useMemo(() => {
+    const currentNet = totalIncome - totalExpense;
+
+    if (filter.viewMode === 'month') {
+      // For month view, we compare current month's net income to the opening balance of the month
+      // Opening Balance = All Time Balance - Current Month Net
+      const openingBalance = allTimeBalance - currentNet;
+      if (openingBalance === 0) return 0;
+      return ((currentNet / openingBalance) * 100).toFixed(1);
+    } else {
+      // For year view, compare with last year
+      const currentYear = parseInt(filter.year);
+      const lastYear = currentYear - 1;
+      const lastYearTransactions = transactions.filter(t => new Date(t.date).getFullYear() === lastYear);
+      const lastYearIncome = lastYearTransactions.filter(t => t.type === 'income').reduce((acc, curr) => acc + curr.amount, 0);
+      const lastYearExpense = lastYearTransactions.filter(t => t.type === 'expense').reduce((acc, curr) => acc + curr.amount, 0);
+      const lastYearNet = lastYearIncome - lastYearExpense;
+
+      if (lastYearNet === 0) return 0;
+      return ((currentNet - lastYearNet) / Math.abs(lastYearNet) * 100).toFixed(1);
+    }
+  }, [filter.viewMode, filter.year, totalIncome, totalExpense, allTimeBalance, transactions]);
+
+  const percentageLabel = filter.viewMode === 'month' ? 'from last month' : 'from last year';
+  const isPositiveChange = Number(percentageChange) >= 0;
+
+  const [categoryColors, setCategoryColors] = useState(() => {
+    try {
+      const saved = localStorage.getItem('expenseTracker_categoryColors');
+      return saved ? JSON.parse(saved) : {};
+    } catch (e) {
+      console.error('Failed to load category colors', e);
+      return {};
+    }
+  });
+
+  const COLORS = [
+    '#2563eb', '#eab308', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316',
+    '#14b8a6', '#f59e0b', '#6366f1', '#84cc16', '#a855f7', '#fb923c',
+    '#0ea5e9', '#facc15', '#d946ef', '#10b981', '#3b82f6', '#fbbf24',
+    '#8b5a3c', '#64748b', '#0891b2', '#ca8a04', '#7c3aed', '#dc2626',
+    '#059669', '#4f46e5'
+  ];
+
+  useEffect(() => {
+    if (!transactions.length) return;
+
+    const expenses = transactions.filter(t => t.type === 'expense');
+    const uniqueCategories = [...new Set(expenses.map(t => t.category))];
+
+    setCategoryColors(prevColors => {
+      const newColors = { ...prevColors };
+      let hasChanges = false;
+      let nextColorIndex = Object.keys(prevColors).length;
+
+      uniqueCategories.forEach(category => {
+        if (!newColors[category]) {
+          newColors[category] = COLORS[nextColorIndex % COLORS.length];
+          nextColorIndex++;
+          hasChanges = true;
+        }
+      });
+
+      if (hasChanges) {
+        localStorage.setItem('expenseTracker_categoryColors', JSON.stringify(newColors));
+        return newColors;
+      }
+      return prevColors;
+    });
+  }, [transactions]);
 
   // Process data for charts
-  const categoryData = transactions
+  const categoryData = filteredTransactions
     .filter(t => t.type === 'expense')
     .reduce((acc, curr) => {
       const existing = acc.find(item => item.name === curr.category);
@@ -44,27 +227,24 @@ export default function Dashboard() {
         acc.push({ name: curr.category, value: curr.amount });
       }
       return acc;
-    }, []);
+    }, [])
+    .sort((a, b) => {
+      if (a.name === 'Other') return 1;
+      if (b.name === 'Other') return -1;
+      return b.value - a.value;
+    })
+    .map((cat) => ({
+      ...cat,
+      color: categoryColors[cat.name] || '#cbd5e1' // Fallback color
+    }));
 
-  // Monthly data for bar chart (simplified for last 6 months)
-  const monthlyData = transactions.reduce((acc, curr) => {
-    const date = new Date(curr.date);
-    const month = date.toLocaleString('default', { month: 'short' });
-    const existing = acc.find(item => item.name === month);
-    if (existing) {
-      if (curr.type === 'income') existing.income += curr.amount;
-      else existing.expense += curr.amount;
-    } else {
-      acc.push({
-        name: month,
-        income: curr.type === 'income' ? curr.amount : 0,
-        expense: curr.type === 'expense' ? curr.amount : 0,
-      });
-    }
-    return acc;
-  }, []).slice(-6); // Last 6 months
-
-  const COLORS = ['#2563eb', '#ef4444', '#22c55e', '#eab308', '#8b5cf6', '#ec4899'];
+  // New Metrics Calculations
+  const healthScore = calculateHealthScore(totalIncome, totalExpense);
+  const smartInsight = getSmartInsights(filteredTransactions);
+  const weeklyActivity = getWeeklyActivity(filteredTransactions);
+  const categoryHighlight = getCategoryHighlight(filteredTransactions);
+  const miniStats = getMiniStats(filteredTransactions, totalExpense);
+  const currentSavings = Math.max(0, totalIncome - totalExpense);
 
   if (loading) return (
     <div className="flex items-center justify-center h-full">
@@ -73,145 +253,241 @@ export default function Dashboard() {
   );
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+    <div className="space-y-5 animate-fade-in pb-0">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-white/40 backdrop-blur-md p-4 rounded-3xl border border-white/50 shadow-sm">
         <div>
-          <h2 className="text-3xl font-bold text-text">Dashboard</h2>
-          <p className="text-text-muted mt-1">Your financial overview</p>
+          <h2 className="text-3xl font-bold text-text tracking-tight">Dashboard</h2>
+          <p className="text-text-muted mt-1 font-medium">Your financial overview</p>
         </div>
-        <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-lg border border-gray-200 text-sm text-text-muted">
-          <Activity size={16} />
-          <span>Last 30 Days</span>
+        {/* Month filter */}
+        <div className="flex items-center gap-2 bg-white p-1.5 rounded-xl border border-gray-100 shadow-sm">
+          {/* View Mode Toggle */}
+          <div className="flex bg-gray-100 rounded-md p-1">
+            <button
+              onClick={() => setFilter(prev => ({ ...prev, viewMode: 'month' }))}
+              className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${filter.viewMode === 'month' ? 'bg-white text-primary shadow-sm' : 'text-text-muted hover:text-text'}`}
+            >
+              Month
+            </button>
+            <button
+              onClick={() => setFilter(prev => ({ ...prev, viewMode: 'year' }))}
+              className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${filter.viewMode === 'year' ? 'bg-white text-primary shadow-sm' : 'text-text-muted hover:text-text'}`}
+            >
+              Year
+            </button>
+          </div>
+
+          {/* Month Filter */}
+          {filter.viewMode === 'month' && (
+            <input
+              type="month"
+              className="px-2 py-1 bg-transparent text-sm focus:outline-none cursor-pointer"
+              value={filter.month}
+              onChange={(e) => setFilter({ ...filter, month: e.target.value })}
+              onKeyDown={(e) => e.preventDefault()}
+            />
+          )}
+
+          {/* Year Filter */}
+          {filter.viewMode === 'year' && (
+            <select
+              className="px-2 py-1 bg-transparent text-sm focus:outline-none cursor-pointer"
+              value={filter.year}
+              onChange={(e) => setFilter({ ...filter, year: e.target.value })}
+            >
+              {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i).map(year => (
+                <option key={year} value={year}>{year}</option>
+              ))}
+            </select>
+          )}
         </div>
       </div>
-      
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+
+      {/* Mini Stats Strip */}
+      <MiniStatsStrip data={miniStats} />
+
+      {/* Main Summary Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5   animate-slide-up">
         <Card className="bg-gradient-to-br from-primary to-blue-600 text-white border-none shadow-glow relative overflow-hidden col-span-1 md:col-span-2 lg:col-span-1">
-          <div className="absolute top-0 right-0 p-4 opacity-10">
-            <Wallet size={80} />
+          <div className="absolute -bottom-4 -right-4 p-7 opacity-20 rotate-0">
+            <Wallet size={100} />
           </div>
+
           <div className="relative z-10 h-full flex flex-col justify-between">
             <div>
-              <p className="text-blue-100 mb-1 font-medium">Total Balance</p>
-              <h3 className="text-3xl font-bold tracking-tight">{formatCurrency(balance)}</h3>
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-blue-100 font-medium">Total Balance</p>
+                <button
+                  onClick={() => setHideBalance(!hideBalance)}
+                  className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
+                  aria-label="Toggle balance visibility"
+                >
+                  {hideBalance ? <EyeOff size={25} /> : <Eye size={25} />}
+                </button>
+              </div>
+              <h3 className="text-3xl font-bold tracking-tight">
+                {hideBalance ? '₹*****' : formatCurrency(balance)}
+              </h3>
             </div>
             <div className="mt-4 bg-white/10 backdrop-blur-sm rounded-lg p-2 text-xs text-blue-50 inline-block w-fit">
-              +2.5% from last month
+              {isPositiveChange ? '+' : ''}{percentageChange}% {percentageLabel}
             </div>
           </div>
         </Card>
 
-        <Card hover className="border-l-4 border-l-success">
+        <Card hover className="bg-gradient-to-br from-white to-emerald-50/50 border-emerald-100 shadow-sm hover:shadow-md transition-all duration-300 hover:-translate-y-1">
           <div className="flex items-center justify-between mb-4">
-            <div className="p-3 bg-green-50 rounded-xl text-success">
+            <div className="p-3 bg-emerald-100/50 rounded-2xl text-emerald-600">
               <TrendingUp size={24} />
             </div>
-            <span className="flex items-center text-xs font-medium text-success bg-green-50 px-2 py-1 rounded-full">
-              <ArrowUpRight size={14} className="mr-1" /> +12%
-            </span>
+            <button
+              onClick={() => setHideIncome(!hideIncome)}
+              className="p-1.5 hover:bg-emerald-50 rounded-lg transition-colors text-emerald-600"
+              aria-label="Toggle income visibility"
+            >
+              {hideIncome ? <EyeOff size={25} /> : <Eye size={25} />}
+            </button>
           </div>
           <div>
-            <p className="text-text-muted text-sm font-medium">Total Income</p>
-            <h3 className="text-2xl font-bold text-text mt-1">{formatCurrency(totalIncome)}</h3>
+            <p className="text-text-muted text-sm font-semibold uppercase tracking-wider">Total Income</p>
+            <h3 className="text-2xl font-bold text-text mt-1">
+              {hideIncome ? '₹*****' : formatCurrency(totalIncome)}
+            </h3>
           </div>
         </Card>
 
-        <Card hover className="border-l-4 border-l-danger">
+        <Card hover className="bg-gradient-to-br from-white to-rose-50/50 border-rose-100 shadow-sm hover:shadow-md transition-all duration-300 hover:-translate-y-1">
           <div className="flex items-center justify-between mb-4">
-            <div className="p-3 bg-red-50 rounded-xl text-danger">
+            <div className="p-3 bg-rose-100/50 rounded-2xl text-rose-600">
               <TrendingDown size={24} />
             </div>
-            <span className="flex items-center text-xs font-medium text-danger bg-red-50 px-2 py-1 rounded-full">
-              <ArrowDownRight size={14} className="mr-1" /> +5%
-            </span>
+
           </div>
           <div>
-            <p className="text-text-muted text-sm font-medium">Total Expense</p>
+            <p className="text-text-muted text-sm font-semibold uppercase tracking-wider">Total Expense</p>
             <h3 className="text-2xl font-bold text-text mt-1">{formatCurrency(totalExpense)}</h3>
           </div>
         </Card>
 
-        <Card hover className="flex flex-col justify-center items-center text-center">
-          <div className="p-3 bg-yellow-50 rounded-full text-yellow-600 mb-2">
-            <Activity size={24} />
-          </div>
-          <p className="text-text-muted text-sm font-medium">Transactions</p>
-          <h3 className="text-2xl font-bold text-text mt-1">{transactions.length}</h3>
-        </Card>
+        <div className="h-full">
+          <HealthBarWidget score={healthScore} />
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Monthly Trends Chart */}
-        <Card className="lg:col-span-2 h-[400px] flex flex-col">
-          <h3 className="text-lg font-bold mb-6 flex items-center gap-2">
-            <div className="w-1 h-6 bg-primary rounded-full"></div>
-            Monthly Trends
-          </h3>
-          <div className="flex-1 min-h-0">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={monthlyData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} dy={10} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
-                <Tooltip 
-                  cursor={{ fill: '#f8fafc' }}
-                  contentStyle={{ 
-                    backgroundColor: '#fff', 
-                    borderRadius: '12px', 
-                    border: 'none', 
-                    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' 
-                  }} 
-                />
-                <Bar dataKey="income" fill="#22c55e" radius={[4, 4, 0, 0]} maxBarSize={40} />
-                <Bar dataKey="expense" fill="#ef4444" radius={[4, 4, 0, 0]} maxBarSize={40} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </Card>
+      {/* Main Grid: Health, Chart, Goal/Category */}
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-5 animate-slide-up" style={{ animationDelay: '0.1s' }}>
 
-        {/* Expense Breakdown */}
-        <Card className="h-[400px] flex flex-col">
-          <h3 className="text-lg font-bold mb-6 flex items-center gap-2">
-            <div className="w-1 h-6 bg-primary rounded-full"></div>
-            Expenses by Category
-          </h3>
-          <div className="flex-1 min-h-0 relative">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={categoryData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={100}
-                  paddingAngle={5}
-                  dataKey="value"
-                  stroke="none"
-                >
-                  {categoryData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip 
-                  formatter={(value) => formatCurrency(value)}
-                  contentStyle={{ 
-                    backgroundColor: 'rgba(255, 255, 255, 0.9)', 
-                    borderRadius: '12px', 
-                    border: 'none', 
-                    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' 
-                  }} 
-                />
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="text-center">
-                <p className="text-xs text-text-muted">Total</p>
-                <p className="font-bold text-lg">{formatCurrency(totalExpense)}</p>
+        {/* Center: Main Chart */}
+        <div className="lg:col-span-2 h-[464px]">
+          <Card className="h-full flex flex-col bg-gradient-to-b from-white to-gray-50/50 border border-gray-100 shadow-lg">
+            <div className="flex items-center justify-between mb-8">
+              <h3 className="text-xl font-bold flex items-center gap-3 text-gray-800">
+                <div className="w-1.5 h-8 bg-gradient-to-b from-primary to-blue-600 rounded-full shadow-sm"></div>
+                Income & Expense Breakdown
+              </h3>
+              <div className="px-3 py-1 bg-primary/5 text-primary text-xs font-semibold rounded-full border border-primary/10">
+                Overview
               </div>
             </div>
+            <div className="flex-1 min-h-0">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={[
+                    { name: 'Total Income', value: totalIncome, type: 'income' },
+                    { name: 'Total Expense', value: totalExpense, type: 'expense' },
+                    ...categoryData.map((cat) => ({
+                      name: cat.name,
+                      value: cat.value,
+                      type: 'category',
+                      color: cat.color
+                    }))
+                  ]}
+                  margin={{ top: 20, right: 10, left: -20, bottom: 0 }}
+                >
+                  <defs>
+                    <linearGradient id="incomeGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#4ade80" stopOpacity={1} />
+                      <stop offset="100%" stopColor="#22c55e" stopOpacity={1} />
+                    </linearGradient>
+                    <linearGradient id="expenseGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#f87171" stopOpacity={1} />
+                      <stop offset="100%" stopColor="#ef4444" stopOpacity={1} />
+                    </linearGradient>
+                    {categoryData.map((cat, index) => (
+                      <linearGradient key={`gradient-${index}`} id={`gradient-${cat.name.replace(/\s+/g, '-')}`} x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={cat.color} stopOpacity={0.8} />
+                        <stop offset="100%" stopColor={cat.color} stopOpacity={1} />
+                      </linearGradient>
+                    ))}
+                    <filter id="shadow" height="200%">
+                      <feDropShadow dx="0" dy="4" stdDeviation="4" floodColor="#000000" floodOpacity="0.1" />
+                    </filter>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis
+                    dataKey="name"
+                    axisLine={false}
+                    tickLine={false}
+                    tick={<CustomXAxisTick />}
+                    interval={0}
+                    height={80}
+                  />
+                  <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
+                  <Tooltip
+                    cursor={{ fill: 'rgba(0,0,0,0.02)' }}
+                    formatter={(value) => formatCurrency(value)}
+                    contentStyle={{
+                      backgroundColor: 'rgba(255, 255, 255, 0.95)',
+                      borderRadius: '16px',
+                      border: 'none',
+                      boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+                      backdropFilter: 'blur(10px)',
+                      padding: '12px 16px'
+                    }}
+                    itemStyle={{ color: '#1e293b', fontWeight: 600 }}
+                  />
+                  <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={26} filter="url(#shadow)">
+                    {
+                      [
+                        { name: 'Total Income', value: totalIncome, type: 'income' },
+                        { name: 'Total Expense', value: totalExpense, type: 'expense' },
+                        ...categoryData.map((cat) => ({
+                          name: cat.name,
+                          value: cat.value,
+                          type: 'category',
+                          color: cat.color
+                        }))
+                      ].map((entry, index) => {
+                        let fillUrl;
+                        if (entry.type === 'income') fillUrl = 'url(#incomeGradient)';
+                        else if (entry.type === 'expense') fillUrl = 'url(#expenseGradient)';
+                        else fillUrl = `url(#gradient-${entry.name.replace(/\s+/g, '-')})`;
+
+                        return <Cell key={`cell-${index}`} fill={fillUrl} strokeWidth={0} />;
+                      })
+                    }
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </Card>
+        </div>
+
+        {/* Right: Goal & Category */}
+        {/* Right: Goal, Category & Weekly */}
+        <div className="lg:col-span-2 flex flex-col gap-4 h-[380px]">
+          <div className="flex-1 grid grid-cols-2 gap-4">
+            <GoalTrackerWidget current={currentSavings} target={filter.viewMode === 'year' ? 0 : savingsGoal} onUpdateGoal={handleUpdateSavingsGoal} />
+            <CategoryHighlightWidget category={categoryHighlight} />
           </div>
-        </Card>
+          <div className="flex-1">
+            <WeeklyActivityWidget data={weeklyActivity} />
+          </div>
+        </div>
       </div>
+
+      {/* Bottom Row */}
+
     </div>
   );
 }
