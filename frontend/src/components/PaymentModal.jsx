@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { X, CreditCard, Wallet } from 'lucide-react';
+import { useState,useEffect } from 'react';
+import { X,CreditCard,Wallet } from 'lucide-react';
 import { Button } from './ui/Button';
 import { formatCurrency } from '../utils/format';
 
@@ -11,15 +11,64 @@ export const PaymentModal = ({
     amount,
     onConfirm
 }) => {
-    const [paymentMethod, setPaymentMethod] = useState('UPI');
-    const [isLoading, setIsLoading] = useState(false);
+    const [paymentMethod,setPaymentMethod] = useState('UPI');
+    const [isLoading,setIsLoading] = useState(false);
+    const [paymentAmount,setPaymentAmount] = useState(amount);
+    const [amountError,setAmountError] = useState('');
+
+    // Update paymentAmount when amount prop changes
+    useEffect(() => {
+        setPaymentAmount(amount);
+        setAmountError('');
+    },[amount]);
+
+    const handleAmountChange = (e) => {
+        const value = e.target.value;
+
+        // Allow empty string for user to clear and retype
+        if (value === '') {
+            setPaymentAmount('');
+            setAmountError('Amount is required');
+            return;
+        }
+
+        const numValue = parseFloat(value);
+
+        // Validate numeric
+        if (isNaN(numValue)) {
+            setAmountError('Please enter a valid number');
+            return;
+        }
+
+        // Validate positive
+        if (numValue <= 0) {
+            setAmountError('Amount must be greater than 0');
+            setPaymentAmount(value);
+            return;
+        }
+
+        // Validate not exceeding max
+        if (numValue > amount) {
+            setAmountError(`Amount cannot exceed ${formatCurrency(amount)}`);
+            setPaymentAmount(value);
+            return;
+        }
+
+        // Valid amount
+        setPaymentAmount(value);
+        setAmountError('');
+    };
+
+    const isValidAmount = paymentAmount && !amountError && parseFloat(paymentAmount) > 0 && parseFloat(paymentAmount) <= amount;
 
     if (!isOpen) return null;
 
     const handleConfirm = async () => {
+        if (!isValidAmount) return;
+
         setIsLoading(true);
         try {
-            await onConfirm(paymentMethod);
+            await onConfirm(paymentMethod,parseFloat(paymentAmount));
             onClose();
         } catch (error) {
             // Error handling is done in parent component
@@ -58,9 +107,31 @@ export const PaymentModal = ({
                             <span className="font-semibold text-text">{receiver}</span>
                         </div>
                         <div className="h-px bg-blue-200 my-2"></div>
-                        <div className="flex justify-between items-center">
-                            <span className="text-text-muted text-sm">Amount</span>
-                            <span className="text-2xl font-bold text-primary">{formatCurrency(amount)}</span>
+                        <div className="space-y-2">
+                            <div className="flex justify-between items-center">
+                                <span className="text-text-muted text-sm">Payment Amount</span>
+                                <span className="text-xs text-text-muted">Max: {formatCurrency(amount)}</span>
+                            </div>
+                            <div className="relative">
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-primary font-bold text-lg">₹</span>
+                                <input
+                                    type="number"
+                                    value={paymentAmount}
+                                    onChange={handleAmountChange}
+                                    disabled={isLoading}
+                                    step="0.01"
+                                    min="0"
+                                    max={amount}
+                                    className={`w-full pl-8 pr-4 py-2 text-xl font-bold rounded-lg border-2 transition-colors ${amountError
+                                        ? 'border-red-300 bg-red-50 text-red-600'
+                                        : 'border-blue-200 bg-white text-primary focus:border-primary focus:ring-2 focus:ring-primary/20'
+                                        } outline-none`}
+                                    placeholder="0.00"
+                                />
+                            </div>
+                            {amountError && (
+                                <p className="text-xs text-red-600 mt-1">{amountError}</p>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -71,8 +142,8 @@ export const PaymentModal = ({
                     <div className="space-y-3">
                         {/* UPI Option */}
                         <label className={`flex items-center p-4 rounded-xl border-2 cursor-pointer transition-all ${paymentMethod === 'UPI'
-                                ? 'border-primary bg-primary/5'
-                                : 'border-gray-200 hover:border-gray-300'
+                            ? 'border-primary bg-primary/5'
+                            : 'border-gray-200 hover:border-gray-300'
                             }`}>
                             <input
                                 type="radio"
@@ -97,8 +168,8 @@ export const PaymentModal = ({
 
                         {/* Cash Option */}
                         <label className={`flex items-center p-4 rounded-xl border-2 cursor-pointer transition-all ${paymentMethod === 'Cash'
-                                ? 'border-primary bg-primary/5'
-                                : 'border-gray-200 hover:border-gray-300'
+                            ? 'border-primary bg-primary/5'
+                            : 'border-gray-200 hover:border-gray-300'
                             }`}>
                             <input
                                 type="radio"
@@ -134,8 +205,8 @@ export const PaymentModal = ({
                     </Button>
                     <Button
                         onClick={handleConfirm}
-                        disabled={isLoading}
-                        className="flex-1 bg-primary hover:bg-primary/90 text-white shadow-glow"
+                        disabled={isLoading || !isValidAmount}
+                        className="flex-1 bg-primary hover:bg-primary/90 text-white shadow-glow disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                         {isLoading ? (
                             <div className="flex items-center gap-2">

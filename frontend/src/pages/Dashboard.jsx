@@ -1,20 +1,20 @@
-import { useEffect, useState, useMemo } from 'react';
-import { Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
+import { useEffect,useState,useMemo } from 'react';
+import { Cell,ResponsiveContainer,Tooltip,BarChart,Bar,XAxis,YAxis,CartesianGrid } from 'recharts';
 import { Card } from '../components/ui/Card';
 import api from '../utils/axiosInstance';
 import { formatCurrency } from '../utils/format';
-import { TrendingUp, TrendingDown, Wallet, ArrowUpRight, ArrowDownRight, Activity, Eye, EyeOff } from 'lucide-react';
+import { TrendingUp,TrendingDown,Wallet,ArrowUpRight,ArrowDownRight,Activity,Eye,EyeOff } from 'lucide-react';
 import {
-  calculateHealthScore, getSmartInsights, getWeeklyActivity,
-  getCategoryHighlight, getMiniStats
+  calculateHealthScore,getSmartInsights,getWeeklyActivity,
+  getCategoryHighlight,getMiniStats
 } from '../utils/dashboardUtils';
 import {
-  MiniStatsStrip, HealthScoreWidget, SmartInsightsWidget,
-  GoalTrackerWidget, WeeklyActivityWidget, CategoryHighlightWidget,
+  MiniStatsStrip,HealthScoreWidget,SmartInsightsWidget,
+  GoalTrackerWidget,WeeklyActivityWidget,CategoryHighlightWidget,
   HealthBarWidget
 } from '../components/DashboardWidgets';
 
-const CustomXAxisTick = ({ x, y, payload }) => {
+const CustomXAxisTick = ({ x,y,payload }) => {
   const MAX_LENGTH = 10;
   let text = payload.value;
   let lines = [];
@@ -38,7 +38,7 @@ const CustomXAxisTick = ({ x, y, payload }) => {
   return (
     <g transform={`translate(${x},${y})`}>
       <text x={0} y={10} dy={10} textAnchor="middle" fill="#64748b" fontSize={11} fontWeight={500}>
-        {lines.map((line, index) => (
+        {lines.map((line,index) => (
           <tspan x={0} dy={index === 0 ? 0 : 14} key={index}>
             {line}
           </tspan>
@@ -50,11 +50,11 @@ const CustomXAxisTick = ({ x, y, payload }) => {
 
 
 export default function Dashboard() {
-  const [transactions, setTransactions] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [savingsGoal, setSavingsGoal] = useState(0);
-  const [hideBalance, setHideBalance] = useState(true);
-  const [hideIncome, setHideIncome] = useState(true);
+  const [transactions,setTransactions] = useState([]);
+  const [loading,setLoading] = useState(true);
+  const [savingsGoal,setSavingsGoal] = useState(0);
+  const [hideBalance,setHideBalance] = useState(true);
+  const [hideIncome,setHideIncome] = useState(true);
 
   useEffect(() => {
     const fetchTransactions = async () => {
@@ -62,45 +62,41 @@ export default function Dashboard() {
         const { data } = await api.get('/transactions');
         setTransactions(data);
       } catch (error) {
-        console.error('Failed to fetch transactions', error);
+        // console.error('Failed to fetch transactions', error);
       } finally {
         setLoading(false);
       }
     };
     fetchTransactions();
-  }, []);
+  },[]);
 
   useEffect(() => {
     const fetchSavingsGoal = async () => {
       try {
-        console.log('Fetching savings goal...');
         const { data } = await api.get('/users/savings-goal');
-        console.log('Fetched savings goal:', data);
         setSavingsGoal(data.savingsGoal || 0);
       } catch (error) {
-        console.error('Failed to fetch savings goal', error);
+        // console.error('Failed to fetch savings goal', error);
       }
     };
     fetchSavingsGoal();
-  }, []);
+  },[]);
 
   const handleUpdateSavingsGoal = async (newGoal) => {
     try {
-      console.log('Updating savings goal to:', newGoal);
-      const { data } = await api.put('/users/savings-goal', { savingsGoal: newGoal });
-      console.log('Received response:', data);
+      const { data } = await api.put('/users/savings-goal',{ savingsGoal: newGoal });
       setSavingsGoal(data.savingsGoal);
     } catch (error) {
-      console.error('Failed to update savings goal', error);
+      // console.error('Failed to update savings goal', error);
       alert('Failed to update savings goal. Please try again.');
     }
   };
 
   // include month filter (default to current month)
-  const [filter, setFilter] = useState({
+  const [filter,setFilter] = useState({
     type: '',
     search: '',
-    month: new Date().toISOString().slice(0, 7), // YYYY-MM
+    month: new Date().toISOString().slice(0,7), // YYYY-MM
     year: new Date().getFullYear().toString(),
     viewMode: 'month' // 'month' or 'year'
   });
@@ -108,11 +104,11 @@ export default function Dashboard() {
   // Calculate All-Time Balance (for Month View)
   const allTimeIncome = transactions
     .filter(t => t.type === 'income')
-    .reduce((acc, curr) => acc + curr.amount, 0);
+    .reduce((acc,curr) => acc + curr.amount,0);
 
   const allTimeExpense = transactions
     .filter(t => t.type === 'expense')
-    .reduce((acc, curr) => acc + curr.amount, 0);
+    .reduce((acc,curr) => acc + curr.amount,0);
 
   const allTimeBalance = allTimeIncome - allTimeExpense;
 
@@ -122,7 +118,7 @@ export default function Dashboard() {
 
     if (filter.viewMode === 'month') {
       if (!filter.month) return true;
-      const tMonth = tDate.toISOString().slice(0, 7); // YYYY-MM
+      const tMonth = tDate.toISOString().slice(0,7); // YYYY-MM
       return tMonth === filter.month;
     } else {
       // Year View
@@ -134,11 +130,11 @@ export default function Dashboard() {
 
   const totalIncome = filteredTransactions
     .filter(t => t.type === 'income')
-    .reduce((acc, curr) => acc + curr.amount, 0);
+    .reduce((acc,curr) => acc + curr.amount,0);
 
   const totalExpense = filteredTransactions
     .filter(t => t.type === 'expense')
-    .reduce((acc, curr) => acc + curr.amount, 0);
+    .reduce((acc,curr) => acc + curr.amount,0);
 
   const balance = filter.viewMode === 'year'
     ? totalIncome - totalExpense // Year Balance
@@ -159,34 +155,34 @@ export default function Dashboard() {
       const currentYear = parseInt(filter.year);
       const lastYear = currentYear - 1;
       const lastYearTransactions = transactions.filter(t => new Date(t.date).getFullYear() === lastYear);
-      const lastYearIncome = lastYearTransactions.filter(t => t.type === 'income').reduce((acc, curr) => acc + curr.amount, 0);
-      const lastYearExpense = lastYearTransactions.filter(t => t.type === 'expense').reduce((acc, curr) => acc + curr.amount, 0);
+      const lastYearIncome = lastYearTransactions.filter(t => t.type === 'income').reduce((acc,curr) => acc + curr.amount,0);
+      const lastYearExpense = lastYearTransactions.filter(t => t.type === 'expense').reduce((acc,curr) => acc + curr.amount,0);
       const lastYearNet = lastYearIncome - lastYearExpense;
 
       if (lastYearNet === 0) return 0;
       return ((currentNet - lastYearNet) / Math.abs(lastYearNet) * 100).toFixed(1);
     }
-  }, [filter.viewMode, filter.year, totalIncome, totalExpense, allTimeBalance, transactions]);
+  },[filter.viewMode,filter.year,totalIncome,totalExpense,allTimeBalance,transactions]);
 
   const percentageLabel = filter.viewMode === 'month' ? 'from last month' : 'from last year';
   const isPositiveChange = Number(percentageChange) >= 0;
 
-  const [categoryColors, setCategoryColors] = useState(() => {
+  const [categoryColors,setCategoryColors] = useState(() => {
     try {
       const saved = localStorage.getItem('expenseTracker_categoryColors');
       return saved ? JSON.parse(saved) : {};
     } catch (e) {
-      console.error('Failed to load category colors', e);
+      // console.error('Failed to load category colors', e);
       return {};
     }
   });
 
   const COLORS = [
-    '#2563eb', '#eab308', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316',
-    '#14b8a6', '#f59e0b', '#6366f1', '#84cc16', '#a855f7', '#fb923c',
-    '#0ea5e9', '#facc15', '#d946ef', '#10b981', '#3b82f6', '#fbbf24',
-    '#8b5a3c', '#64748b', '#0891b2', '#ca8a04', '#7c3aed', '#dc2626',
-    '#059669', '#4f46e5'
+    '#2563eb','#eab308','#8b5cf6','#ec4899','#06b6d4','#f97316',
+    '#14b8a6','#f59e0b','#6366f1','#84cc16','#a855f7','#fb923c',
+    '#0ea5e9','#facc15','#d946ef','#10b981','#3b82f6','#fbbf24',
+    '#8b5a3c','#64748b','#0891b2','#ca8a04','#7c3aed','#dc2626',
+    '#059669','#4f46e5'
   ];
 
   useEffect(() => {
@@ -209,26 +205,26 @@ export default function Dashboard() {
       });
 
       if (hasChanges) {
-        localStorage.setItem('expenseTracker_categoryColors', JSON.stringify(newColors));
+        localStorage.setItem('expenseTracker_categoryColors',JSON.stringify(newColors));
         return newColors;
       }
       return prevColors;
     });
-  }, [transactions]);
+  },[transactions]);
 
   // Process data for charts
   const categoryData = filteredTransactions
     .filter(t => t.type === 'expense')
-    .reduce((acc, curr) => {
+    .reduce((acc,curr) => {
       const existing = acc.find(item => item.name === curr.category);
       if (existing) {
         existing.value += curr.amount;
       } else {
-        acc.push({ name: curr.category, value: curr.amount });
+        acc.push({ name: curr.category,value: curr.amount });
       }
       return acc;
-    }, [])
-    .sort((a, b) => {
+    },[])
+    .sort((a,b) => {
       if (a.name === 'Other') return 1;
       if (b.name === 'Other') return -1;
       return b.value - a.value;
@@ -239,12 +235,12 @@ export default function Dashboard() {
     }));
 
   // New Metrics Calculations
-  const healthScore = calculateHealthScore(totalIncome, totalExpense);
+  const healthScore = calculateHealthScore(totalIncome,totalExpense);
   const smartInsight = getSmartInsights(filteredTransactions);
   const weeklyActivity = getWeeklyActivity(filteredTransactions);
   const categoryHighlight = getCategoryHighlight(filteredTransactions);
-  const miniStats = getMiniStats(filteredTransactions, totalExpense);
-  const currentSavings = Math.max(0, totalIncome - totalExpense);
+  const miniStats = getMiniStats(filteredTransactions,totalExpense);
+  const currentSavings = Math.max(0,totalIncome - totalExpense);
 
   if (loading) return (
     <div className="flex items-center justify-center h-full">
@@ -264,13 +260,13 @@ export default function Dashboard() {
           {/* View Mode Toggle */}
           <div className="flex bg-gray-100 rounded-md p-1">
             <button
-              onClick={() => setFilter(prev => ({ ...prev, viewMode: 'month' }))}
+              onClick={() => setFilter(prev => ({ ...prev,viewMode: 'month' }))}
               className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${filter.viewMode === 'month' ? 'bg-white text-primary shadow-sm' : 'text-text-muted hover:text-text'}`}
             >
               Month
             </button>
             <button
-              onClick={() => setFilter(prev => ({ ...prev, viewMode: 'year' }))}
+              onClick={() => setFilter(prev => ({ ...prev,viewMode: 'year' }))}
               className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${filter.viewMode === 'year' ? 'bg-white text-primary shadow-sm' : 'text-text-muted hover:text-text'}`}
             >
               Year
@@ -283,7 +279,7 @@ export default function Dashboard() {
               type="month"
               className="px-2 py-1 bg-transparent text-sm focus:outline-none cursor-pointer"
               value={filter.month}
-              onChange={(e) => setFilter({ ...filter, month: e.target.value })}
+              onChange={(e) => setFilter({ ...filter,month: e.target.value })}
               onKeyDown={(e) => e.preventDefault()}
             />
           )}
@@ -293,9 +289,9 @@ export default function Dashboard() {
             <select
               className="px-2 py-1 bg-transparent text-sm focus:outline-none cursor-pointer"
               value={filter.year}
-              onChange={(e) => setFilter({ ...filter, year: e.target.value })}
+              onChange={(e) => setFilter({ ...filter,year: e.target.value })}
             >
-              {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i).map(year => (
+              {Array.from({ length: 5 },(_,i) => new Date().getFullYear() - i).map(year => (
                 <option key={year} value={year}>{year}</option>
               ))}
             </select>
@@ -393,8 +389,8 @@ export default function Dashboard() {
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
                   data={[
-                    { name: 'Total Income', value: totalIncome, type: 'income' },
-                    { name: 'Total Expense', value: totalExpense, type: 'expense' },
+                    { name: 'Total Income',value: totalIncome,type: 'income' },
+                    { name: 'Total Expense',value: totalExpense,type: 'expense' },
                     ...categoryData.map((cat) => ({
                       name: cat.name,
                       value: cat.value,
@@ -402,7 +398,7 @@ export default function Dashboard() {
                       color: cat.color
                     }))
                   ]}
-                  margin={{ top: 20, right: 10, left: -20, bottom: 0 }}
+                  margin={{ top: 20,right: 10,left: -20,bottom: 0 }}
                 >
                   <defs>
                     <linearGradient id="incomeGradient" x1="0" y1="0" x2="0" y2="1">
@@ -413,8 +409,8 @@ export default function Dashboard() {
                       <stop offset="0%" stopColor="#f87171" stopOpacity={1} />
                       <stop offset="100%" stopColor="#ef4444" stopOpacity={1} />
                     </linearGradient>
-                    {categoryData.map((cat, index) => (
-                      <linearGradient key={`gradient-${index}`} id={`gradient-${cat.name.replace(/\s+/g, '-')}`} x1="0" y1="0" x2="0" y2="1">
+                    {categoryData.map((cat,index) => (
+                      <linearGradient key={`gradient-${index}`} id={`gradient-${cat.name.replace(/\s+/g,'-')}`} x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" stopColor={cat.color} stopOpacity={0.8} />
                         <stop offset="100%" stopColor={cat.color} stopOpacity={1} />
                       </linearGradient>
@@ -432,7 +428,7 @@ export default function Dashboard() {
                     interval={0}
                     height={80}
                   />
-                  <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b', fontSize: 12 }} />
+                  <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748b',fontSize: 12 }} />
                   <Tooltip
                     cursor={{ fill: 'rgba(0,0,0,0.02)' }}
                     formatter={(value) => formatCurrency(value)}
@@ -444,24 +440,24 @@ export default function Dashboard() {
                       backdropFilter: 'blur(10px)',
                       padding: '12px 16px'
                     }}
-                    itemStyle={{ color: '#1e293b', fontWeight: 600 }}
+                    itemStyle={{ color: '#1e293b',fontWeight: 600 }}
                   />
-                  <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={26} filter="url(#shadow)">
+                  <Bar dataKey="value" radius={[4,4,0,0]} maxBarSize={26} filter="url(#shadow)">
                     {
                       [
-                        { name: 'Total Income', value: totalIncome, type: 'income' },
-                        { name: 'Total Expense', value: totalExpense, type: 'expense' },
+                        { name: 'Total Income',value: totalIncome,type: 'income' },
+                        { name: 'Total Expense',value: totalExpense,type: 'expense' },
                         ...categoryData.map((cat) => ({
                           name: cat.name,
                           value: cat.value,
                           type: 'category',
                           color: cat.color
                         }))
-                      ].map((entry, index) => {
+                      ].map((entry,index) => {
                         let fillUrl;
                         if (entry.type === 'income') fillUrl = 'url(#incomeGradient)';
                         else if (entry.type === 'expense') fillUrl = 'url(#expenseGradient)';
-                        else fillUrl = `url(#gradient-${entry.name.replace(/\s+/g, '-')})`;
+                        else fillUrl = `url(#gradient-${entry.name.replace(/\s+/g,'-')})`;
 
                         return <Cell key={`cell-${index}`} fill={fillUrl} strokeWidth={0} />;
                       })

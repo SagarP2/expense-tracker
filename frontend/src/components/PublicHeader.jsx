@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom';
 
 export default function PublicHeader() {
   return (
-    <header className="w-full border-b border-gray-200/70 backdrop-blur-sm">
+    <header className="w-full bg-white/60 border-b border-gray-200/70 backdrop-blur-sm">
       <div className="mx-auto max-w-7xl px-4 py-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-primary to-blue-600 flex items-center justify-center text-white font-bold">ET</div>

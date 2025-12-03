@@ -1,13 +1,23 @@
-import { NavLink } from 'react-router-dom';
-import { LayoutDashboard,Receipt,ChevronRight,Wallet,Users } from 'lucide-react';
+import { NavLink,useNavigate } from 'react-router-dom';
+import { LayoutDashboard,Receipt,ChevronRight,Wallet,Users,LogOut } from 'lucide-react';
 import { clsx } from 'clsx';
+import { useAuth } from '../context/AuthContext';
 
 export function Sidebar({ isOpen,setIsOpen }) {
+  const { logout } = useAuth();
+  const navigate = useNavigate();
+
   const navItems = [
-    { icon: LayoutDashboard,label: 'Dashboard',path: '/' },
+    { icon: LayoutDashboard,label: 'Dashboard',path: '/dashboard' },
     { icon: Receipt,label: 'Transactions',path: '/transactions' },
     { icon: Users,label: 'Collaborations',path: '/collaborations' },
   ];
+
+  const handleLogout = () => {
+    logout();
+    setIsOpen(false);
+    navigate('/login');
+  };
 
   return (
     <>
@@ -53,6 +63,16 @@ export function Sidebar({ isOpen,setIsOpen }) {
           ))}
         </nav>
 
+        {/* Logout Button - Mobile Only */}
+        <div className="p-4 border-t border-white/10 md:hidden">
+          <button
+            onClick={handleLogout}
+            className="group flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 w-full text-text-muted hover:bg-red-50 hover:text-red-600"
+          >
+            <LogOut size={20} className="transition-transform group-hover:scale-110" />
+            <span className="flex-1 text-left">Logout</span>
+          </button>
+        </div>
 
       </aside>
     </>

@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState,useEffect,useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams,useNavigate } from 'react-router-dom';
 import { Card } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
@@ -12,36 +12,42 @@ import {
   deleteCollabTransaction,
   updateCollabTransaction,
   getBalanceSummary,
-  settlePayment
+  settlePayment,
+  requestDeletion,
+  acceptDeletion,
+  rejectDeletion
 } from '../../services/collabApi';
+import { AlertModal } from '../../components/ui/AlertModal';
 import { PaymentModal } from '../../components/PaymentModal';
+
+// ... (inside component)
+
+
 import { formatCurrency } from '../../utils/format';
 import { ConfirmDialog } from '../../components/ui/ConfirmDialog';
 import {
-  ArrowLeft,
   Plus,
-  TrendingUp,
-  TrendingDown,
-  Users,
+  Edit,
   Trash2,
   Calendar,
-  ArrowUpRight,
-  ArrowDownRight,
-  X,
+  TrendingUp,
+  TrendingDown,
   PieChart as PieChartIcon,
   Search,
-  Edit2
+  Filter,
+  ChevronLeft,
+  ChevronRight,
+  AlertCircle,
+  ArrowLeft,
+  Users,
+  ArrowUpRight,
+  ArrowDownRight,
+  X
 } from 'lucide-react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+import { PieChart,Pie,Cell,ResponsiveContainer,Tooltip } from 'recharts';
 import clsx from 'clsx';
 
-/**
- * Pure function to compute settlement
- * @param {Object} userA - { name: string, total_expense: number }
- * @param {Object} userB - { name: string, total_expense: number }
- * @returns {Object} { final_statement, owedAmount, payer, receiver, split_amount, total_expense }
- */
-const computeSettlement = (userA, userB, settlements = { userA_paid: 0, userA_received: 0, userB_paid: 0, userB_received: 0 }) => {
+const computeSettlement = (userA,userB,settlements = { userA_paid: 0,userA_received: 0,userB_paid: 0,userB_received: 0 }) => {
   const totalExpense = userA.total_expense + userB.total_expense;
   const splitAmount = totalExpense / 2;
 
@@ -65,24 +71,24 @@ const computeSettlement = (userA, userB, settlements = { userA_paid: 0, userA_re
   if (Math.abs(userABalance) > 0.01) {
     if (userABalance > 0) {
       // User A paid more than split (or settled debt), so B owes A
-      payer = userB.name;
-      receiver = userA.name;
+      payer = 'userB';
+      receiver = 'userA';
       owedAmount = Math.abs(userABalance);
-      final_statement = `${payer} pays ${receiver} ₹${formatCurrency(owedAmount).replace('₹', '')}`;
+      final_statement = `${userB.name} Paid To ${userA.name} ₹${formatCurrency(owedAmount).replace('₹','')}`;
     } else {
       // User A paid less than split, so A owes B
-      payer = userA.name;
-      receiver = userB.name;
+      payer = 'userA';
+      receiver = 'userB';
       owedAmount = Math.abs(userABalance);
-      final_statement = `${payer} pays ${receiver} ₹${formatCurrency(owedAmount).replace('₹', '')}`;
+      final_statement = `${userA.name} Paid To ${userB.name} ₹${formatCurrency(owedAmount).replace('₹','')}`;
     }
   }
 
   return {
     final_statement,
     owedAmount,
-    payer,
-    receiver,
+    payer, // 'userA' or 'userB' string
+    receiver, // 'userA' or 'userB' string
     split_amount: splitAmount,
     total_expense: totalExpense
   };
@@ -93,28 +99,33 @@ export default function CollaborationDashboard() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const [collaboration, setCollaboration] = useState(null);
-  const [transactions, setTransactions] = useState([]);
-  const [balance, setBalance] = useState(null);
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState(false);
-  const [editingId, setEditingId] = useState(null);
-  const [lockedType, setLockedType] = useState(null);
-  const [deleteDialog, setDeleteDialog] = useState({ isOpen: false, id: null });
-  const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [paymentLoading, setPaymentLoading] = useState(false);
-  const [filter, setFilter] = useState({
+
+  // Refs must be declared before useState hooks
+  const userASettlementRef = useRef(null);
+  const userBSettlementRef = useRef(null);
+
+  const [collaboration,setCollaboration] = useState(null);
+  const [transactions,setTransactions] = useState([]);
+  const [balance,setBalance] = useState(null);
+  const [error,setError] = useState(null);
+  const [loading,setLoading] = useState(true);
+  const [showModal,setShowModal] = useState(false);
+  const [editingId,setEditingId] = useState(null);
+  const [lockedType,setLockedType] = useState(null);
+  const [deleteDialog,setDeleteDialog] = useState({ isOpen: false,id: null });
+  const [showPaymentModal,setShowPaymentModal] = useState(false);
+  const [paymentLoading,setPaymentLoading] = useState(false);
+  const [filter,setFilter] = useState({
     userId: '',
     search: '',
     type: '',
-    month: new Date().toISOString().slice(0, 7),
+    month: new Date().toISOString().slice(0,7),
     year: new Date().getFullYear().toString(),
     viewMode: 'month' // 'month' or 'year'
   });
-  const [currentPage, setCurrentPage] = useState(1);
+  const [currentPage,setCurrentPage] = useState(1);
   const transactionsPerPage = 10;
-  const [formData, setFormData] = useState({
+  const [formData,setFormData] = useState({
     amount: '',
     type: 'expense',
     category: '',
@@ -123,25 +134,38 @@ export default function CollaborationDashboard() {
     date: new Date().toISOString().split('T')[0],
   });
 
+  const [alertState,setAlertState] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    type: 'info' // 'success', 'error', 'info'
+  });
+
   const defaultCategories = {
-    expense: ['Food', 'Rent', 'Bill', 'Traveling', 'Personal', 'Other'],
-    income: ['Salary', 'Home', 'Other']
+    expense: ['Food','Rent','Bill','Traveling','Personal','Other'],
+    income: ['Salary','Home','Other']
   };
 
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [collabData, transData, balanceData] = await Promise.all([
+      const params = { month: filter.month };
+      const [collabData,transactionsData,balanceData] = await Promise.all([
         getCollaboration(id),
-        getCollabTransactions(id),
-        getBalanceSummary(id)
+        getCollabTransactions(id,params),
+        getBalanceSummary(id,params)
       ]);
       setCollaboration(collabData);
-      setTransactions(transData);
+      setTransactions(transactionsData);
       setBalance(balanceData);
     } catch (error) {
-      console.error('Failed to fetch data', error);
-      setError('Failed to load collaboration data. Please try again.');
+      console.error('Failed to fetch data',error);
+      // If collaboration not found (deleted), navigate back to list
+      if (error.response?.status === 404) {
+        navigate('/collaborations');
+      } else {
+        setError('Failed to load collaboration data. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -149,7 +173,18 @@ export default function CollaborationDashboard() {
 
   useEffect(() => {
     fetchData();
-  }, [id]);
+  },[id,filter.month]);
+
+  // Poll for collaboration status when deletion is requested
+  useEffect(() => {
+    if (!collaboration?.deletionRequest?.requestedBy) return;
+
+    const interval = setInterval(() => {
+      fetchData();
+    },3000); // Check every 3 seconds
+
+    return () => clearInterval(interval);
+  },[collaboration?.deletionRequest?.requestedBy]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -160,7 +195,12 @@ export default function CollaborationDashboard() {
       : (formData.category ?? '').trim();
 
     if (!categoryToSave) {
-      alert('Please provide a category.');
+      setAlertState({
+        isOpen: true,
+        title: 'Missing Category',
+        message: 'Please provide a category.',
+        type: 'error'
+      });
       return;
     }
 
@@ -175,9 +215,9 @@ export default function CollaborationDashboard() {
 
     try {
       if (editingId) {
-        await updateCollabTransaction(id, editingId, payload);
+        await updateCollabTransaction(id,editingId,payload);
       } else {
-        await addCollabTransaction(id, payload);
+        await addCollabTransaction(id,payload);
       }
 
       setShowModal(false);
@@ -192,23 +232,41 @@ export default function CollaborationDashboard() {
       });
       fetchData();
     } catch (error) {
-      console.error('Failed to save transaction', error);
+      console.error('Failed to save transaction',error);
     }
   };
 
   const handleDelete = async (transactionId) => {
     const transaction = transactions.find(t => t._id === transactionId);
+
+    // Prevent deletion of settlement transactions
+    if (transaction && (transaction.category === 'Settlement' || transaction.category === 'Settlement Received')) {
+      setAlertState({
+        isOpen: true,
+        title: 'Action Not Allowed',
+        message: "Settlement transactions cannot be deleted.",
+        type: 'error'
+      });
+      setDeleteDialog({ isOpen: false,id: null });
+      return;
+    }
+
     if (transaction && transaction.userId._id !== user._id) {
-      alert("You can't delete collaborator data");
-      setDeleteDialog({ isOpen: false, id: null });
+      setAlertState({
+        isOpen: true,
+        title: 'Permission Denied',
+        message: "You can't delete collaborator data",
+        type: 'error'
+      });
+      setDeleteDialog({ isOpen: false,id: null });
       return;
     }
 
     try {
-      await deleteCollabTransaction(id, transactionId);
+      await deleteCollabTransaction(id,transactionId);
       fetchData();
     } catch (error) {
-      console.error('Failed to delete transaction', error);
+      console.error('Failed to delete transaction',error);
     }
   };
 
@@ -231,30 +289,35 @@ export default function CollaborationDashboard() {
     setShowModal(true);
   };
 
-  const handlePayment = async (paymentMethod) => {
+  const handlePayment = async (paymentMethod,customAmount) => {
     if (!displayBalance || displayBalance.owedAmount === 0) return;
 
     setPaymentLoading(true);
     try {
-      // Find payer and receiver IDs
-      const payerUser = displayBalance.userA.name === displayBalance.final_statement.split(' ')[0]
-        ? displayBalance.userA
-        : displayBalance.userB;
-      const receiverUser = payerUser.id === displayBalance.userA.id
-        ? displayBalance.userB
-        : displayBalance.userA;
+      // Use the explicit payer and receiver objects from displayBalance
+      const payerUser = displayBalance.payer;
+      const receiverUser = displayBalance.receiver;
+
+      if (!payerUser || !receiverUser) {
+        throw new Error("Could not identify payer or receiver");
+      }
 
       const paymentData = {
         payerId: payerUser.id,
         receiverId: receiverUser.id,
-        amount: displayBalance.owedAmount,
+        amount: customAmount || displayBalance.owedAmount, // Use custom amount if provided
         method: paymentMethod
       };
 
-      const response = await settlePayment(id, paymentData);
+      const response = await settlePayment(id,paymentData);
 
       // Show success message
-      alert('Payment settled successfully!');
+      setAlertState({
+        isOpen: true,
+        title: 'Payment Successful',
+        message: `Payment of ${formatCurrency(customAmount || displayBalance.owedAmount)} settled successfully!`,
+        type: 'success'
+      });
 
       // Update state immediately with returned data
       if (response.balance) {
@@ -262,28 +325,107 @@ export default function CollaborationDashboard() {
       }
 
       if (response.transactions && response.transactions.length > 0) {
-        setTransactions(prev => [...response.transactions, ...prev]);
+        setTransactions(prev => [...response.transactions,...prev]);
       }
+
+      // Auto reload page after 2 seconds
+      setTimeout(() => {
+        window.location.reload();
+      },2000);
 
       setShowPaymentModal(false);
     } catch (error) {
-      console.error('Failed to settle payment', error);
-      alert(error.response?.data?.message || 'Failed to settle payment. Please try again.');
+      console.error('Failed to settle payment',error);
+      setAlertState({
+        isOpen: true,
+        title: 'Payment Failed',
+        message: error.response?.data?.message || 'Failed to settle payment. Please try again.',
+        type: 'error'
+      });
     } finally {
       setPaymentLoading(false);
     }
   };
 
+  // Deletion workflow handlers
+  const handleRequestDeletion = async () => {
+    try {
+      await requestDeletion(id);
+      setAlertState({
+        isOpen: true,
+        title: 'Deletion Requested',
+        message: 'Deletion request sent. Waiting for other user to accept.',
+        type: 'success'
+      });
+      // Refresh collaboration data
+      fetchData();
+    } catch (error) {
+      console.error('Failed to request deletion',error);
+      setAlertState({
+        isOpen: true,
+        title: 'Request Failed',
+        message: error.response?.data?.message || 'Failed to request deletion.',
+        type: 'error'
+      });
+    }
+  };
+
+  const handleAcceptDeletion = async () => {
+    try {
+      await acceptDeletion(id);
+      setAlertState({
+        isOpen: true,
+        title: 'Collaboration Deleted',
+        message: 'Collaboration has been deleted successfully.',
+        type: 'success'
+      });
+      // Navigate back to collaborations list
+      setTimeout(() => navigate('/collaborations'),2000);
+    } catch (error) {
+      console.error('Failed to accept deletion',error);
+      setAlertState({
+        isOpen: true,
+        title: 'Action Failed',
+        message: error.response?.data?.message || 'Failed to delete collaboration.',
+        type: 'error'
+      });
+    }
+  };
+
+  const handleRejectDeletion = async () => {
+    try {
+      await rejectDeletion(id);
+      setAlertState({
+        isOpen: true,
+        title: 'Deletion Rejected',
+        message: 'Deletion request has been rejected.',
+        type: 'success'
+      });
+      // Refresh collaboration data
+      fetchData();
+    } catch (error) {
+      console.error('Failed to reject deletion',error);
+      setAlertState({
+        isOpen: true,
+        title: 'Action Failed',
+        message: error.response?.data?.message || 'Failed to reject deletion.',
+        type: 'error'
+      });
+    }
+  };
+
+  // Compute settlement
+
   const filteredTransactions = transactions.filter(t => {
     const matchesUser = filter.userId ? (t.userId?._id === filter.userId || t.userId === filter.userId) : true;
     const matchesType = filter.type ? t.type === filter.type : true;
-    const matchesMonth = filter.month ? (t.date?.startsWith ? t.date.startsWith(filter.month) : new Date(t.date).toISOString().slice(0, 7) === filter.month) : true;
+    const matchesMonth = filter.month ? (t.date?.startsWith ? t.date.startsWith(filter.month) : new Date(t.date).toISOString().slice(0,7) === filter.month) : true;
     const search = (filter.search ?? '').toLowerCase().trim();
     const matchesSearch = !search ||
       (t.description?.toLowerCase().includes(search)) ||
       (t.category?.toLowerCase().includes(search));
     return matchesUser && matchesType && matchesMonth && matchesSearch;
-  }).sort((a, b) => {
+  }).sort((a,b) => {
     const dateA = new Date(a.date);
     const dateB = new Date(b.date);
     if (dateB - dateA !== 0) return dateB - dateA;
@@ -298,12 +440,22 @@ export default function CollaborationDashboard() {
   const totalPages = Math.ceil(filteredTransactions.length / transactionsPerPage);
   const indexOfLastTransaction = currentPage * transactionsPerPage;
   const indexOfFirstTransaction = indexOfLastTransaction - transactionsPerPage;
-  const currentTransactions = filteredTransactions.slice(indexOfFirstTransaction, indexOfLastTransaction);
+  const currentTransactions = filteredTransactions.slice(indexOfFirstTransaction,indexOfLastTransaction);
 
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [filter.search, filter.userId, filter.month, filter.type]);
+  },[filter.search,filter.userId,filter.month,filter.type]);
+
+  // Auto-scroll settlement lists to bottom to show latest settlements
+  useEffect(() => {
+    if (userASettlementRef.current) {
+      userASettlementRef.current.scrollTop = userASettlementRef.current.scrollHeight;
+    }
+    if (userBSettlementRef.current) {
+      userBSettlementRef.current.scrollTop = userBSettlementRef.current.scrollHeight;
+    }
+  },[transactions,filter.month]); // Trigger when transactions or month changes
 
   if (loading) return (
     <div className="flex items-center justify-center h-full">
@@ -329,7 +481,7 @@ export default function CollaborationDashboard() {
     const tDate = new Date(t.date);
 
     if (filter.viewMode === 'month') {
-      const matchesMonth = filter.month ? (t.date?.startsWith ? t.date.startsWith(filter.month) : tDate.toISOString().slice(0, 7) === filter.month) : true;
+      const matchesMonth = filter.month ? (t.date?.startsWith ? t.date.startsWith(filter.month) : tDate.toISOString().slice(0,7) === filter.month) : true;
       return matchesMonth;
     } else {
       // Year View
@@ -343,12 +495,12 @@ export default function CollaborationDashboard() {
   const calculateSummary = () => {
     // Totals (Gross)
     const totalExpense = monthTransactions
-      .filter(t => t.type === 'expense')
-      .reduce((sum, t) => sum + t.amount, 0);
+      .filter(t => t.type === 'expense' && t.category !== 'Settlement')
+      .reduce((sum,t) => sum + t.amount,0);
 
     const totalIncome = monthTransactions
-      .filter(t => t.type === 'income')
-      .reduce((sum, t) => sum + t.amount, 0);
+      .filter(t => t.type === 'income' && t.category !== 'Settlement Received')
+      .reduce((sum,t) => sum + t.amount,0);
 
     const totalSavings = totalIncome - totalExpense;
 
@@ -358,35 +510,45 @@ export default function CollaborationDashboard() {
     // Separate Shared Expenses/Income from Settlements
     const userAExpense = monthTransactions
       .filter(t => t.userId._id === userAId && t.type === 'expense' && t.category !== 'Settlement')
-      .reduce((sum, t) => sum + t.amount, 0);
+      .reduce((sum,t) => sum + t.amount,0);
 
     const userAIncome = monthTransactions
       .filter(t => t.userId._id === userAId && t.type === 'income' && t.category !== 'Settlement Received')
-      .reduce((sum, t) => sum + t.amount, 0);
+      .reduce((sum,t) => sum + t.amount,0);
 
     const userASettledPaid = monthTransactions
       .filter(t => t.userId._id === userAId && t.type === 'expense' && t.category === 'Settlement')
-      .reduce((sum, t) => sum + t.amount, 0);
+      .reduce((sum,t) => sum + t.amount,0);
 
     const userASettledReceived = monthTransactions
       .filter(t => t.userId._id === userAId && t.type === 'income' && t.category === 'Settlement Received')
-      .reduce((sum, t) => sum + t.amount, 0);
+      .reduce((sum,t) => sum + t.amount,0);
 
     const userBExpense = monthTransactions
       .filter(t => t.userId._id === userBId && t.type === 'expense' && t.category !== 'Settlement')
-      .reduce((sum, t) => sum + t.amount, 0);
+      .reduce((sum,t) => sum + t.amount,0);
 
     const userBIncome = monthTransactions
       .filter(t => t.userId._id === userBId && t.type === 'income' && t.category !== 'Settlement Received')
-      .reduce((sum, t) => sum + t.amount, 0);
+      .reduce((sum,t) => sum + t.amount,0);
 
     const userBSettledPaid = monthTransactions
       .filter(t => t.userId._id === userBId && t.type === 'expense' && t.category === 'Settlement')
-      .reduce((sum, t) => sum + t.amount, 0);
+      .reduce((sum,t) => sum + t.amount,0);
 
     const userBSettledReceived = monthTransactions
       .filter(t => t.userId._id === userBId && t.type === 'income' && t.category === 'Settlement Received')
-      .reduce((sum, t) => sum + t.amount, 0);
+      .reduce((sum,t) => sum + t.amount,0);
+
+    // Get individual settlement transactions for breakdown
+    // Get individual settlement transactions for breakdown
+    const userASettlements = monthTransactions
+      .filter(t => t.userId._id === userAId && (t.category === 'Settlement' || t.category === 'Settlement Received'))
+      .sort((a,b) => new Date(a.date) - new Date(b.date));
+
+    const userBSettlements = monthTransactions
+      .filter(t => t.userId._id === userBId && (t.category === 'Settlement' || t.category === 'Settlement Received'))
+      .sort((a,b) => new Date(a.date) - new Date(b.date));
 
     // Savings (Gross)
     const userASavings = (userAIncome + userASettledReceived) - (userAExpense + userASettledPaid);
@@ -394,8 +556,8 @@ export default function CollaborationDashboard() {
 
     // Settlement Logic using pure function
     const settlement = computeSettlement(
-      { name: balance.userA.name, total_expense: userAExpense },
-      { name: balance.userB.name, total_expense: userBExpense },
+      { name: balance.userA.name,total_expense: userAExpense },
+      { name: balance.userB.name,total_expense: userBExpense },
       {
         userA_paid: userASettledPaid,
         userA_received: userASettledReceived,
@@ -403,6 +565,10 @@ export default function CollaborationDashboard() {
         userB_received: userBSettledReceived
       }
     );
+
+    // Map 'userA'/'userB' strings back to actual user objects
+    const payer = settlement.payer === 'userA' ? balance.userA : (settlement.payer === 'userB' ? balance.userB : null);
+    const receiver = settlement.receiver === 'userA' ? balance.userA : (settlement.receiver === 'userB' ? balance.userB : null);
 
     // Calculate balances for individual cards (for "Owes/Gets back" display)
     // Note: This display usually reflects the *current* standing, so it should match the settlement logic
@@ -427,7 +593,8 @@ export default function CollaborationDashboard() {
         total_expense: userAExpense, // Shared expense only
         total_income: userAIncome,
         savings: userASavings,
-        balance: userABalance
+        balance: userABalance,
+        settlements: userASettlements
       },
       userB: {
         id: userBId,
@@ -435,10 +602,13 @@ export default function CollaborationDashboard() {
         total_expense: userBExpense, // Shared expense only
         total_income: userBIncome,
         savings: userBSavings,
-        balance: userBBalance
+        balance: userBBalance,
+        settlements: userBSettlements
       },
       final_statement: settlement.final_statement,
-      owedAmount: settlement.owedAmount
+      owedAmount: settlement.owedAmount,
+      payer,
+      receiver
     };
   };
 
@@ -446,8 +616,8 @@ export default function CollaborationDashboard() {
 
   // Chart Data (Expense Distribution) - Optional, but if we keep it, use month data
   const chartData = [
-    { name: balance.userA.name, value: displayBalance.userA.total_expense, color: '#2563eb' },
-    { name: balance.userB.name, value: displayBalance.userB.total_expense, color: '#ef4444' }
+    { name: balance.userA.name,value: displayBalance.userA.total_expense,color: '#2563eb' },
+    { name: balance.userB.name,value: displayBalance.userB.total_expense,color: '#ef4444' }
   ].filter(d => d.value > 0);
 
   return (
@@ -502,48 +672,99 @@ export default function CollaborationDashboard() {
             <Plus size={20} />
             Add Expense
           </Button>
+          {/* Delete Collaboration Button */}
+          {!collaboration.deletionRequest?.requestedBy && (
+            <div className="flex justify-end">
+              <Button
+                onClick={handleRequestDeletion}
+                className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white"
+              >
+                <Trash2 size={18} />
+                Delete Collaboration
+              </Button>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* 1. Income Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <Card className="bg-gradient-to-br from-success to-green-600 text-white border-none shadow-glow">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-green-100 font-medium">Total Income</p>
-            <TrendingUp size={20} className="text-green-100" />
-          </div>
-          <h3 className="text-3xl font-bold">{formatCurrency(displayBalance.total_income)}</h3>
-        </Card>
-
-        <Card hover className="border-l-4 border-l-green-500">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-text-muted font-medium">{displayBalance.userA.name}'s Income</p>
-            <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center text-green-600">
-              {displayBalance.userA.name.charAt(0)}
+      {/* Pending Deletion Alert */}
+      {collaboration.deletionRequest?.requestedBy && (
+        <Card className="bg-yellow-50 border-yellow-200">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <AlertCircle className="text-yellow-600" size={24} />
+              <div>
+                <h3 className="font-semibold text-yellow-900">Deletion Requested</h3>
+                <p className="text-sm text-yellow-700">
+                  {collaboration.deletionRequest.requestedBy._id === user?._id
+                    ? 'You have requested to delete this collaboration. Waiting for approval.'
+                    : `${collaboration.deletionRequest.requestedBy.name} has requested to delete this collaboration.`}
+                </p>
+              </div>
             </div>
+            {collaboration.deletionRequest.requestedBy._id !== user?._id && (
+              <div className="flex gap-2">
+                <Button
+                  onClick={handleAcceptDeletion}
+                  className="bg-red-600 hover:bg-red-700 text-white"
+                >
+                  Accept & Delete
+                </Button>
+                <Button
+                  onClick={handleRejectDeletion}
+                  className="bg-gray-200 hover:bg-gray-300 text-gray-800"
+                >
+                  Reject
+                </Button>
+              </div>
+            )}
           </div>
-          <h3 className="text-2xl font-bold text-text">{formatCurrency(displayBalance.userA.total_income)}</h3>
         </Card>
+      )}
 
-        <Card hover className="border-l-4 border-l-green-500">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-text-muted font-medium">{displayBalance.userB.name}'s Income</p>
-            <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center text-green-600">
-              {displayBalance.userB.name.charAt(0)}
+
+
+      {/* 1. Income Summary Cards - Only show if there is income */}
+      {displayBalance.total_income > 0 && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          <Card className="bg-gradient-to-br from-success to-green-600 text-white border-none shadow-glow">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-green-100 font-medium">Total Income</p>
+              <TrendingUp size={20} className="text-green-100" />
             </div>
-          </div>
-          <h3 className="text-2xl font-bold text-text">{formatCurrency(displayBalance.userB.total_income)}</h3>
-        </Card>
+            <h3 className="text-3xl font-bold">{formatCurrency(displayBalance.total_income)}</h3>
+          </Card>
 
-        <Card className="bg-gradient-to-br from-purple-500 to-indigo-600 text-white border-none shadow-glow">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-indigo-100 font-medium">Total Savings</p>
-            <PieChartIcon size={20} className="text-indigo-100" />
-          </div>
-          <h3 className="text-3xl font-bold">{formatCurrency(displayBalance.total_savings)}</h3>
-          <p className="text-sm text-indigo-100 mt-2">Income - Expenses</p>
-        </Card>
-      </div>
+          <Card hover className="border-l-4 border-l-green-500">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-text-muted font-medium">{displayBalance.userA.name}'s Income</p>
+              <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center text-green-600">
+                {displayBalance.userA.name.charAt(0)}
+              </div>
+            </div>
+            <h3 className="text-2xl font-bold text-text">{formatCurrency(displayBalance.userA.total_income)}</h3>
+          </Card>
+
+          <Card hover className="border-l-4 border-l-green-500">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-text-muted font-medium">{displayBalance.userB.name}'s Income</p>
+              <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center text-green-600">
+                {displayBalance.userB.name.charAt(0)}
+              </div>
+            </div>
+            <h3 className="text-2xl font-bold text-text">{formatCurrency(displayBalance.userB.total_income)}</h3>
+          </Card>
+
+          <Card className="bg-gradient-to-br from-purple-500 to-indigo-600 text-white border-none shadow-glow">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-indigo-100 font-medium">Total Savings</p>
+              <PieChartIcon size={20} className="text-indigo-100" />
+            </div>
+            <h3 className="text-3xl font-bold">{formatCurrency(displayBalance.total_savings)}</h3>
+            <p className="text-sm text-indigo-100 mt-2">Income - Expenses</p>
+          </Card>
+        </div>
+      )}
 
       {/* 2. Expense Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
@@ -613,12 +834,27 @@ export default function CollaborationDashboard() {
                   Amount: {formatCurrency(displayBalance.owedAmount)}
                 </p>
                 {/* Show Pay button only if current user is the payer */}
-                {user && displayBalance.final_statement.startsWith(user.name) && (
+                {user && displayBalance.payer && displayBalance.payer.id === user._id && (
                   <button
                     onClick={() => setShowPaymentModal(true)}
                     className="mt-1 px-3 py-1 bg-white text-primary font-semibold rounded-lg hover:bg-blue-50 transition-colors shadow-md"
                   >
                     Pay Now
+                  </button>
+                )}
+
+                {/* Show Request Payment button only if current user is the receiver */}
+                {user && displayBalance.receiver && displayBalance.receiver.id === user._id && (
+                  <button
+                    onClick={() => setAlertState({
+                      isOpen: true,
+                      title: 'Request Sent',
+                      message: `Payment request sent to ${displayBalance.payer.name}`,
+                      type: 'success'
+                    })}
+                    className="mt-1 px-3 py-1 bg-white text-primary font-semibold rounded-lg hover:bg-blue-50 transition-colors shadow-md"
+                  >
+                    Request
                   </button>
                 )}
               </div>
@@ -631,10 +867,18 @@ export default function CollaborationDashboard() {
       <PaymentModal
         isOpen={showPaymentModal}
         onClose={() => setShowPaymentModal(false)}
-        payer={displayBalance?.final_statement.split(' ')[0] || ''}
-        receiver={displayBalance?.final_statement.split(' ')[2] || ''}
+        payer={displayBalance?.payer?.name || ''}
+        receiver={displayBalance?.receiver?.name || ''}
         amount={displayBalance?.owedAmount || 0}
         onConfirm={handlePayment}
+      />
+
+      <AlertModal
+        isOpen={alertState.isOpen}
+        onClose={() => setAlertState(prev => ({ ...prev,isOpen: false }))}
+        title={alertState.title}
+        message={alertState.message}
+        type={alertState.type}
       />
 
       {/* 3. Savings Breakdown */}
@@ -653,6 +897,19 @@ export default function CollaborationDashboard() {
               <span className="text-text-muted">Expense</span>
               <span className="text-danger font-medium">-{formatCurrency(displayBalance.userA.total_expense)}</span>
             </div>
+
+            {/* Settlements */}
+            <div ref={userASettlementRef} className="max-h-[80px] overflow-y-auto pr-1 custom-scrollbar space-y-1">
+              {displayBalance.userA.settlements.map((s,index) => (
+                <div key={s._id} className="flex justify-between text-sm">
+                  <span className="text-text-muted">Settlement {index + 1}</span>
+                  <span className={s.type === 'income' ? "text-success font-medium" : "text-danger font-medium"}>
+                    {s.type === 'income' ? '+' : '-'}{formatCurrency(s.amount)}
+                  </span>
+                </div>
+              ))}
+            </div>
+
             <div className="h-px bg-gray-100 my-2"></div>
             <div className="flex justify-between font-bold">
               <span className="text-text">Net Savings</span>
@@ -677,6 +934,19 @@ export default function CollaborationDashboard() {
               <span className="text-text-muted">Expense</span>
               <span className="text-danger font-medium">-{formatCurrency(displayBalance.userB.total_expense)}</span>
             </div>
+
+            {/* Settlements */}
+            <div ref={userBSettlementRef} className="max-h-[80px] overflow-y-auto pr-1 custom-scrollbar space-y-2">
+              {displayBalance.userB.settlements.map((s,index) => (
+                <div key={s._id} className="flex justify-between text-sm">
+                  <span className="text-text-muted">Settlement {index + 1}</span>
+                  <span className={s.type === 'income' ? "text-success font-medium" : "text-danger font-medium"}>
+                    {s.type === 'income' ? '+' : '-'}{formatCurrency(s.amount)}
+                  </span>
+                </div>
+              ))}
+            </div>
+
             <div className="h-px bg-gray-100 my-2"></div>
             <div className="flex justify-between font-bold">
               <span className="text-text">Net Savings</span>
@@ -706,7 +976,7 @@ export default function CollaborationDashboard() {
               <select
                 className="px-3 py-2 rounded-lg border border-gray-200 bg-white/50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all text-sm"
                 value={filter.userId}
-                onChange={(e) => setFilter({ ...filter, userId: e.target.value })}
+                onChange={(e) => setFilter({ ...filter,userId: e.target.value })}
               >
                 <option value="">All Users</option>
                 {collaboration.users.map(u => (
@@ -718,7 +988,7 @@ export default function CollaborationDashboard() {
               <select
                 className="px-3 py-2 rounded-lg border border-gray-200 bg-white/50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all text-sm"
                 value={filter.type}
-                onChange={(e) => setFilter({ ...filter, type: e.target.value })}
+                onChange={(e) => setFilter({ ...filter,type: e.target.value })}
               >
                 <option value="">All Types</option>
                 <option value="income">Income</option>
@@ -730,13 +1000,13 @@ export default function CollaborationDashboard() {
                 {/* View Mode Toggle */}
                 <div className="flex bg-gray-100 rounded-md p-1">
                   <button
-                    onClick={() => setFilter(prev => ({ ...prev, viewMode: 'month' }))}
+                    onClick={() => setFilter(prev => ({ ...prev,viewMode: 'month' }))}
                     className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${filter.viewMode === 'month' ? 'bg-white text-primary shadow-sm' : 'text-text-muted hover:text-text'}`}
                   >
                     Month
                   </button>
                   <button
-                    onClick={() => setFilter(prev => ({ ...prev, viewMode: 'year' }))}
+                    onClick={() => setFilter(prev => ({ ...prev,viewMode: 'year' }))}
                     className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${filter.viewMode === 'year' ? 'bg-white text-primary shadow-sm' : 'text-text-muted hover:text-text'}`}
                   >
                     Year
@@ -749,7 +1019,7 @@ export default function CollaborationDashboard() {
                     type="month"
                     className="px-2 py-1 bg-transparent text-sm focus:outline-none cursor-pointer"
                     value={filter.month}
-                    onChange={(e) => setFilter({ ...filter, month: e.target.value })}
+                    onChange={(e) => setFilter({ ...filter,month: e.target.value })}
                     onKeyDown={(e) => e.preventDefault()}
                   />
                 )}
@@ -759,9 +1029,9 @@ export default function CollaborationDashboard() {
                   <select
                     className="px-2 py-1 bg-transparent text-sm focus:outline-none cursor-pointer"
                     value={filter.year}
-                    onChange={(e) => setFilter({ ...filter, year: e.target.value })}
+                    onChange={(e) => setFilter({ ...filter,year: e.target.value })}
                   >
-                    {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i).map(year => (
+                    {Array.from({ length: 5 },(_,i) => new Date().getFullYear() - i).map(year => (
                       <option key={year} value={year}>{year}</option>
                     ))}
                   </select>
@@ -777,7 +1047,7 @@ export default function CollaborationDashboard() {
                 placeholder="Search transactions..."
                 className="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-200 bg-white/50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all text-sm"
                 value={filter.search}
-                onChange={(e) => setFilter({ ...filter, search: e.target.value })}
+                onChange={(e) => setFilter({ ...filter,search: e.target.value })}
               />
             </div>
           </div>
@@ -805,7 +1075,7 @@ export default function CollaborationDashboard() {
                           <div className="flex items-center gap-4">
                             <Calendar size={16} className="text-gray-400" />
                             <span className="text-sm font-medium whitespace-nowrap">
-                              {new Date(t.date).toLocaleDateString('en-GB', { weekday: 'short' }).toUpperCase()}, {new Date(t.date).toLocaleDateString('en-GB').replace(/\//g, '-')}
+                              {new Date(t.date).toLocaleDateString('en-GB',{ weekday: 'short' }).toUpperCase()}, {new Date(t.date).toLocaleDateString('en-GB').replace(/\//g,'-')}
                             </span>
                           </div>
                         </td>
@@ -831,12 +1101,16 @@ export default function CollaborationDashboard() {
                         </td>
                         <td className="py-3.5 px-4 text-right">
                           <div className="flex items-center justify-end gap-2 transition-opacity">
-                            <button onClick={() => handleEdit(t)} className="p-1.5 text-text-muted hover:text-primary hover:bg-primary/10 rounded-lg transition-colors">
-                              <Edit2 size={16} />
-                            </button>
-                            <button onClick={() => setDeleteDialog({ isOpen: true, id: t._id })} className="p-1.5 text-text-muted hover:text-danger hover:bg-danger/10 rounded-lg transition-colors">
-                              <Trash2 size={16} />
-                            </button>
+                            {t.category !== 'Settlement' && t.category !== 'Settlement Received' && (
+                              <>
+                                <button onClick={() => handleEdit(t)} className="p-1.5 text-text-muted hover:text-primary hover:bg-primary/10 rounded-lg transition-colors">
+                                  <Edit size={16} />
+                                </button>
+                                <button onClick={() => setDeleteDialog({ isOpen: true,id: t._id })} className="p-1.5 text-text-muted hover:text-danger hover:bg-danger/10 rounded-lg transition-colors">
+                                  <Trash2 size={16} />
+                                </button>
+                              </>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -867,7 +1141,7 @@ export default function CollaborationDashboard() {
                         <div className="flex items-center gap-2 mt-0.5">
                           <p className="text-[10px] text-text-muted flex items-center gap-1">
                             <Calendar size={10} />
-                            {new Date(t.date).toLocaleDateString('en-GB', { weekday: 'short' }).toUpperCase()}, {new Date(t.date).toLocaleDateString('en-GB').replace(/\//g, '-')}
+                            {new Date(t.date).toLocaleDateString('en-GB',{ weekday: 'short' }).toUpperCase()}, {new Date(t.date).toLocaleDateString('en-GB').replace(/\//g,'-')}
                           </p>
                           <p className="text-[10px] text-text-muted">by {t.userId?.name}</p>
                         </div>
@@ -880,19 +1154,25 @@ export default function CollaborationDashboard() {
                       )}>
                         {t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}
                       </span>
-                      <div className="flex gap-1">
-                        <button
-                          onClick={() => handleEdit(t)}
-                          className="p-1.5 text-text-muted hover:text-primary hover:bg-primary/10 rounded-lg transition-colors"
-                        >
-                          <Edit2 size={14} />
-                        </button>
-                        <button
-                          onClick={() => setDeleteDialog({ isOpen: true, id: t._id })}
-                          className="p-1.5 text-text-muted hover:text-danger hover:bg-danger/10 rounded-lg transition-colors"
-                        >
-                          <Trash2 size={14} />
-                        </button>
+                      <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {t.category !== 'Settlement' && t.category !== 'Settlement Received' && (
+                          <>
+                            <button
+                              onClick={() => handleEdit(t)}
+                              className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                              title="Edit"
+                            >
+                              <Edit size={18} />
+                            </button>
+                            <button
+                              onClick={() => setDeleteDialog({ isOpen: true,id: t._id })}
+                              className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Delete"
+                            >
+                              <Trash2 size={18} />
+                            </button>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -915,18 +1195,18 @@ export default function CollaborationDashboard() {
           {filteredTransactions.length > 0 && (
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-4 border-t border-gray-100 bg-gray-50/30">
               <div className="text-sm text-text-muted">
-                Showing {indexOfFirstTransaction + 1} to {Math.min(indexOfLastTransaction, filteredTransactions.length)} of {filteredTransactions.length} transactions
+                Showing {indexOfFirstTransaction + 1} to {Math.min(indexOfLastTransaction,filteredTransactions.length)} of {filteredTransactions.length} transactions
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                  onClick={() => setCurrentPage(prev => Math.max(prev - 1,1))}
                   disabled={currentPage === 1}
                   className="px-4 py-2 rounded-lg border border-gray-300 bg-white text-sm font-medium text-text hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
                 >
                   Previous
                 </button>
                 <div className="flex items-center gap-1">
-                  {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                  {Array.from({ length: totalPages },(_,i) => i + 1).map(page => (
                     <button
                       key={page}
                       onClick={() => setCurrentPage(page)}
@@ -942,7 +1222,7 @@ export default function CollaborationDashboard() {
                   ))}
                 </div>
                 <button
-                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                  onClick={() => setCurrentPage(prev => Math.min(prev + 1,totalPages))}
                   disabled={currentPage === totalPages}
                   className="px-4 py-2 rounded-lg border border-gray-300 bg-white text-sm font-medium text-text hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm"
                 >
@@ -984,7 +1264,7 @@ export default function CollaborationDashboard() {
                           value="expense"
                           checked={formData.type === 'expense'}
                           onChange={(e) =>
-                            setFormData((prev) => ({ ...prev, type: e.target.value, category: '', customCategory: '' }))
+                            setFormData((prev) => ({ ...prev,type: e.target.value,category: '',customCategory: '' }))
                           }
                           className="hidden peer"
                         />
@@ -1000,7 +1280,7 @@ export default function CollaborationDashboard() {
                           value="income"
                           checked={formData.type === 'income'}
                           onChange={(e) =>
-                            setFormData((prev) => ({ ...prev, type: e.target.value, category: '', customCategory: '' }))
+                            setFormData((prev) => ({ ...prev,type: e.target.value,category: '',customCategory: '' }))
                           }
                           className="hidden peer"
                         />
@@ -1018,7 +1298,7 @@ export default function CollaborationDashboard() {
                       <Input
                         type="number"
                         value={formData.amount}
-                        onChange={(e) => setFormData((prev) => ({ ...prev, amount: e.target.value }))}
+                        onChange={(e) => setFormData((prev) => ({ ...prev,amount: e.target.value }))}
                         required
                         min="0"
                         step="0.01"
@@ -1045,9 +1325,9 @@ export default function CollaborationDashboard() {
                           onBlur={() => {
                             setFormData((prev) => {
                               if ((prev.customCategory ?? '').trim() !== '') {
-                                return { ...prev, category: '__other__' };
+                                return { ...prev,category: '__other__' };
                               } else {
-                                return { ...prev, category: '', customCategory: '' };
+                                return { ...prev,category: '',customCategory: '' };
                               }
                             });
                           }}
@@ -1061,9 +1341,9 @@ export default function CollaborationDashboard() {
                             onChange={(e) => {
                               const value = e.target.value;
                               if (value === 'Other') {
-                                setFormData((prev) => ({ ...prev, category: '__other__', customCategory: '' }));
+                                setFormData((prev) => ({ ...prev,category: '__other__',customCategory: '' }));
                               } else {
-                                setFormData((prev) => ({ ...prev, category: value, customCategory: '' }));
+                                setFormData((prev) => ({ ...prev,category: value,customCategory: '' }));
                               }
                             }}
                             required
@@ -1089,7 +1369,7 @@ export default function CollaborationDashboard() {
                       <Input
                         type="text"
                         value={formData.description}
-                        onChange={(e) => setFormData((prev) => ({ ...prev, description: e.target.value }))}
+                        onChange={(e) => setFormData((prev) => ({ ...prev,description: e.target.value }))}
                         placeholder="What was this for?"
                         className="py-3"
                       />
@@ -1102,7 +1382,7 @@ export default function CollaborationDashboard() {
                         type="date"
                         value={formData.date}
                         max={new Date().toISOString().split('T')[0]}
-                        onChange={(e) => setFormData((prev) => ({ ...prev, date: e.target.value }))}
+                        onChange={(e) => setFormData((prev) => ({ ...prev,date: e.target.value }))}
                         required
                         className="py-3"
                       />
@@ -1122,7 +1402,7 @@ export default function CollaborationDashboard() {
       {/* Confirm Delete Dialog */}
       <ConfirmDialog
         isOpen={deleteDialog.isOpen}
-        onClose={() => setDeleteDialog({ isOpen: false, id: null })}
+        onClose={() => setDeleteDialog({ isOpen: false,id: null })}
         onConfirm={() => handleDelete(deleteDialog.id)}
         title="Delete Transaction"
         message="Are you sure you want to delete this transaction? This action cannot be undone."

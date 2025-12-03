@@ -37,8 +37,8 @@ export const addCollabTransaction = async (id,transactionData) => {
 };
 
 // Get collaboration transactions
-export const getCollabTransactions = async (id) => {
-    const { data } = await api.get(`/collab/${id}/transactions`);
+export const getCollabTransactions = async (id,params) => {
+    const { data } = await api.get(`/collab/${id}/transactions`,{ params });
     return data;
 };
 
@@ -55,13 +55,29 @@ export const deleteCollabTransaction = async (collabId,transactionId) => {
 };
 
 // Get balance summary
-export const getBalanceSummary = async (id) => {
-    const { data } = await api.get(`/collab/${id}/balance-summary`);
+export const getBalanceSummary = async (id,params) => {
+    const { data } = await api.get(`/collab/${id}/balance-summary`,{ params });
     return data;
 };
 
 // Settle payment
-export const settlePayment = async (id, paymentData) => {
-    const { data } = await api.post(`/collab/${id}/settlement/pay`, paymentData);
-    return data;
+export const settlePayment = async (id,paymentData) => {
+    const response = await api.post(`/collab/${id}/settlement/pay`,paymentData);
+    return response.data;
+};
+
+// Deletion workflow
+export const requestDeletion = async (id) => {
+    const response = await api.post(`/collab/${id}/request-deletion`);
+    return response.data;
+};
+
+export const acceptDeletion = async (id) => {
+    const response = await api.post(`/collab/${id}/accept-deletion`);
+    return response.data;
+};
+
+export const rejectDeletion = async (id) => {
+    const response = await api.post(`/collab/${id}/reject-deletion`);
+    return response.data;
 };
